@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { Delay, LineBadge, Platform } from "@/components/ui/Badges";
 import { fmtTime } from "@/lib/time";
-import { looksLikeVehicleNumber, platformInfo, STATUS_LABEL, type TripSummary } from "@/lib/trips";
+import type { LiveTrip } from "@/lib/api";
+import { looksLikeVehicleNumber, parseTrainNumber, platformInfo, STATUS_LABEL, type TripSummary } from "@/lib/trips";
 
 export type StatusFilter =
   | "alle"
@@ -60,6 +61,10 @@ interface SidebarProps {
   onSelect: (id: string) => void;
   lineStyle: (id: string) => { color: string; textColor: string };
   loading: boolean;
+  /** Fahrten, deren gemeldete Wagenreihung die gesuchte Fahrzeugnummer enthält */
+  vehicleHits: { trip: LiveTrip; vehicle: string }[];
+  /** Scan-Knopf unter der Suche */
+  scan?: React.ReactNode;
 }
 
 const STATUS_DOT: Record<string, string> = {
@@ -77,6 +82,7 @@ export function Sidebar(p: SidebarProps) {
   const activeFilters =
     (p.filters.dest ? 1 : 0) + (p.filters.station ? 1 : 0) + (p.filters.status !== "alle" ? 1 : 0);
   const vehicleLike = looksLikeVehicleNumber(p.query);
+  const train = parseTrainNumber(p.query);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -104,18 +110,47 @@ export function Sidebar(p: SidebarProps) {
             </button>
           )}
         </label>
-        {vehicleLike && (
+        {p.vehicleHits.length > 0 && (
+          <ul className="mt-2 space-y-1">
+            {p.vehicleHits.map(({ trip, vehicle }) => {
+              const ls = p.lineStyle(trip.line_id);
+              return (
+                <li key={trip.id}>
+                  <button
+                    onClick={() => p.onSelect(trip.id)}
+                    className="flex w-full items-center gap-2 rounded-md border border-accent/30 bg-accent/[0.06] px-2.5 py-1.5 text-left text-[12px] hover:border-accent/60"
+                  >
+                    <LineBadge id={trip.line_id} color={ls.color} textColor={ls.textColor} size="sm" />
+                    <span className="min-w-0 flex-1 truncate">
+                      Fahrzeug <span className="tnum font-medium">{vehicle}</span>
+                      <span className="text-muted">
+                        {" "}
+                        · {trip.line_id} Zug {trip.train_number ?? "–"} → {trip.destination_name ?? "–"}
+                      </span>
+                    </span>
+                    <span aria-hidden className="text-faint">
+                      ⌖
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {(vehicleLike || train) && (
           <Link
-            href={`/fahrzeuge?q=${encodeURIComponent(p.query.trim())}`}
+            href={`/fahrzeuge?q=${encodeURIComponent(train ?? p.query.trim())}`}
             className="mt-2 flex items-center justify-between rounded-md border border-line px-2.5 py-1.5 text-[12px] text-muted hover:border-[var(--line-strong)] hover:text-fg"
           >
             <span>
-              Fahrzeug „{p.query.trim()}“ in der Fahrzeugsuche öffnen
+              {train ? `Alle Fahrten von Zug ${train}` : `Fahrzeug „${p.query.trim()}“`} in der Fahrzeugsuche öffnen
             </span>
             <span aria-hidden>→</span>
           </Link>
         )}
       </div>
+
+      {p.scan && <div className="px-4 pt-2">{p.scan}</div>}
 
       {/* Linien-Chips */}
       <div className="px-4 pt-3">

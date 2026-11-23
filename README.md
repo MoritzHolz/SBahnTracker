@@ -2,7 +2,7 @@
 
 Live-Karte der S-Bahn Stuttgart: Fahrten mit Echtzeit-Zeiten, Gleisen und Haltfolge, Züge als animierte 2D-Modellzüge entlang der echten Strecke. Dazu kommt ein Datenmodell für Fahrzeughistorie, Wagenreihungsvergleich, Zugtrennungs- und Abstellort-Erkennung.
 
-> **Datenlage in einem Satz:** Fahrten, Zeiten, Verspätungen, Gleise und Zugnummern sind echt (NVBW EFA). **Positionen sind immer geschätzt.** **Fahrzeugnummern/Wagenreihungen sind derzeit nicht verfügbar**, weil keine freie, zulässige Quelle existiert (siehe [Limitierungen](#limitierungen)).
+> **Datenlage in einem Satz:** Fahrten, Zeiten, Verspätungen, Gleise und Zugnummern sind echt (NVBW EFA). **Positionen sind immer geschätzt.** **Fahrzeugnummern** liefert der zuschaltbare [Live-Webscanner](docs/scanner.md), soweit die Webseite sie anzeigt.
 
 ## Inhalt
 - [Architektur](#architektur)
@@ -52,6 +52,8 @@ Details zum Frontend: [`docs/frontend.md`](docs/frontend.md).
 
 Erfasst wird alle 3 min: Ein Abfahrtsmonitor am Hbf (tief) mit Zeitfenster −80 min … ca. +2,5 h, max. 200 Ereignisse. Alle Linien S1–S6/S60 passieren den Hbf (tief), so dass jede laufende Fahrt mit ihrer **kompletten** Haltfolge im Fenster liegt. Die S62 kommt über einen zweiten Monitor in Feuerbach. Pro Lauf werden höchstens 6 neue Streckengeometrien nachgeladen. Insgesamt sind das etwa 2–8 Anfragen alle 3 min.
 
+Zusätzlich gibt es den **Live-Webscanner** (Playwright, Ein/Aus-Schalter unter `/scanner`): [docs/scanner.md](docs/scanner.md).
+
 ## Setup
 
 ```bash
@@ -100,7 +102,7 @@ Das Collector-Secret liegt in `private.app_config` (nicht über die API lesbar) 
 | `parking_estimates` | vermuteter Abstellort/Status mit Konfidenz und Begründung |
 | `collector_runs` | Protokoll jedes Sammellaufs |
 
-RLS: Alle Tabellen sind für `anon` nur lesbar. Geschrieben wird ausschließlich über `security definer`-Funktionen mit `service_role` bzw. über Trigger.
+RLS: Alle Tabellen sind für `anon` nur lesbar. Geschrieben wird über `security definer`-Funktionen mit `service_role`, über Trigger, vom Webscanner (eigenes Secret) und über `report_formation` (PIN, nach 10 Fehlversuchen pro Stunde gesperrt).
 
 ## API (RPC)
 
@@ -110,6 +112,7 @@ RLS: Alle Tabellen sind für `anon` nur lesbar. Geschrieben wird ausschließlich
 | `get_route_shapes()` | alle Geometrien `[[lon,lat],…]` |
 | `get_source_status()` | letzter Sammellauf, letzter Erfolg, Status Wagenreihungsquelle |
 | `search_vehicle(p_query)` | Fahrzeugprofil, Sichtungen, Trennungen, Abstellort |
+| `report_formation(p_pin, p_trip_id, p_vehicles, p_station_id?)` | eigene Fahrzeugmeldung (Detailpanel „Fahrzeug melden“), Fehler als `{error}`; der PIN-Hash liegt in `private.app_config` (`report_pin_hash`) |
 
 ## Cron-Jobs
 
@@ -164,10 +167,10 @@ Mit synthetischen Daten getestet: 8 → 4 Fahrzeuge an einer anderen Station erg
 ## Limitierungen
 
 - **Keine echten Positionen.** Es gibt keinen öffentlichen GPS-Feed; alle Positionen sind aus Zeiten geschätzt.
-- **Keine Fahrzeugnummern/Wagenreihung.**
+- **Fahrzeugnummern/Wagenreihung nur mit eingeschaltetem Webscanner** (siehe [docs/scanner.md](docs/scanner.md)), je Fahrt einmal am Hbf (tief) bzw. durch eigene Meldung.
   - Die offizielle digitale Wagenreihung der DB deckt laut DB den Nahverkehr nicht oder nicht nachweislich ab.
   - Die inoffizielle bahn.de-API ist bot-geschützt und wird deshalb nicht genutzt.
-  - Folge: Fahrzeugsuche, Fahrtenbuch, Zugtrennung und Abstellorte sind implementiert, bleiben aber leer.
+  - Ohne Scanner bleiben Fahrzeugsuche, Fahrtenbuch, Zugtrennung und Abstellorte leer. Da jede Fahrt nur einmal gelesen wird, erkennt die Zugtrennung Änderungen innerhalb einer Fahrt nur mit zusätzlichen eigenen Meldungen.
   - Anbindung, sobald eine zulässige Quelle da ist (z. B. DB RIS::Formations mit eigenem API-Key): Den Collector so erweitern, dass er an Endhalten bzw. Trennungsbahnhöfen (Renningen, Marbach) einmal pro Fahrt eine Wagenreihung abfragt und in `formations` schreibt. Alles Weitere läuft automatisch.
 - **Abdeckung:** Es werden nur Fahrten erfasst, die den Hbf (tief) bzw. Feuerbach (S62) passieren. Bei Sperrungen der Stammstrecke (z. B. Linienäste ohne Hbf) fehlen Fahrten. Dann `MONITOR_STOPS` in `collect/index.ts` um weitere Stationen ergänzen.
 - **EFA-Nutzung:** EFA ist ein offener, aber nicht SLA-gestützter Dienst. Der Collector fragt sparsam ab (User-Agent gesetzt, 1 Wiederholung).

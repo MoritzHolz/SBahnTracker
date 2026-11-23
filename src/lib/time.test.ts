@@ -69,3 +69,47 @@ describe("tripMatchesQuery", () => {
     expect(tripMatchesQuery(t, "zzz")).toBe(false);
   });
 });
+
+import { bahnExpertUrl, normalizeVehicle, parseTrainNumber, tripsWithVehicle, unitNumber } from "./trips";
+
+describe("Fahrzeugmeldungen", () => {
+  it("normalisiert Fahrzeugnummern", () => {
+    expect(normalizeVehicle("423502")).toBe("423 502");
+    expect(normalizeVehicle(" 423 502 ")).toBe("423 502");
+    expect(normalizeVehicle("423-502")).toBe("423 502");
+    expect(normalizeVehicle("42350")).toBeNull();
+    expect(normalizeVehicle("abc")).toBeNull();
+  });
+  it("führt Wagennummern auf die Einheit zurück", () => {
+    for (const car of ["423 810", "433 810", "433 310", "423310"]) expect(unitNumber(car)).toBe("423 310");
+    for (const car of ["430 537", "431 537", "431 037"]) expect(unitNumber(car)).toBe("430 037");
+    expect(unitNumber("430 728")).toBe("430 228");
+    expect(unitNumber("7172")).toBeNull();
+  });
+  it("erkennt Zugnummern", () => {
+    for (const q of ["7172", "S1 7172", "s 7172", "S7172", "Zug 7172", " Zugnummer 7172 "]) expect(parseTrainNumber(q)).toBe("7172");
+    for (const q of ["423 502", "423502", "Kirchheim", "S1", "717"]) expect(parseTrainNumber(q)).not.toBe("7172");
+  });
+  it("findet Fahrten über Zugnummer mit Linie und über Wagennummer", () => {
+    const t = {
+      line_id: "S1", train_number: "7172", trip_code: "444", origin_name: "Herrenberg", destination_name: "Kirchheim (T)",
+      stops: [], formation: { vehicles: ["423 310"], observed_at: null, station_name: null, source: "bahn.expert" },
+    } as unknown as Parameters<typeof tripMatchesQuery>[0];
+    for (const q of ["7172", "S1 7172", "Zug 7172", "S 7172", "S7172", "7172 kirchheim", "423 310", "423 810", "423810"]) expect(tripMatchesQuery(t, q)).toBe(true);
+    for (const q of ["S2 7172", "Zug 7173", "423 311", "444 herrenberg"]) expect(tripMatchesQuery(t, q)).toBe(false);
+  });
+  it("findet Fahrten mit gemeldetem Fahrzeug", () => {
+    const trips = [
+      { id: "a", formation: { vehicles: ["423 502", "423 019"], observed_at: null, station_name: null, source: "manual" } },
+      { id: "b", formation: null },
+    ];
+    expect(tripsWithVehicle(trips, "423502").map((h) => [h.trip.id, h.vehicle])).toEqual([["a", "423 502"]]);
+    expect(tripsWithVehicle(trips, "019")[0].vehicle).toBe("423 019");
+    expect(tripsWithVehicle(trips, "42")).toEqual([]);
+  });
+  it("baut bahn.expert-Links mit Sonderfall Hbf (tief)", () => {
+    expect(bahnExpertUrl("Stuttgart Hauptbahnhof (tief)")).toBe("https://bahn.expert/Stuttgart%20Hbf%20(tief)");
+    expect(bahnExpertUrl("Hauptbahnhof (tief)")).toBe("https://bahn.expert/Stuttgart%20Hbf%20(tief)");
+    expect(bahnExpertUrl("Schwabstraße")).toBe("https://bahn.expert/Schwabstra%C3%9Fe");
+  });
+});

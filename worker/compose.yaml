@@ -1,0 +1,9 @@
+services:
+  webscanner:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    init: true
+    ipc: host
+    # SIGTERM beendet einen laufenden Scan sauber
+    stop_grace_period: 30s

@@ -13,6 +13,7 @@ import {
   type SmoothState,
   type TrackCache,
 } from "@/lib/position";
+import { isStaleWebOnly } from "@/lib/scanner";
 import { addAppLayers, MODEL_ZOOM, setSourceData, SRC_ROUTES, SRC_STATIONS, SRC_TRAINS, TRAIN_LAYERS } from "./layers";
 import { addIcons, configureMaplibre, EXTRA_ATTRIBUTION, resolveBaseStyle, type BaseStyleKind } from "./maplibre";
 
@@ -189,7 +190,8 @@ export default function LiveMap(props: LiveMapProps) {
 
       const dim =
         (p.focusLine != null && p.focusLine !== trip.line_id) ||
-        (p.matchIds != null && !p.matchIds.has(trip.id));
+        (p.matchIds != null && !p.matchIds.has(trip.id)) ||
+        isStaleWebOnly(trip, now);
       const props = {
         id: trip.id,
         line: trip.line_id,

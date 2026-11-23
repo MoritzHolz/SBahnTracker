@@ -8,6 +8,10 @@ begin
   -- Fahrten älter als 30 Tage (Halte werden per FK mitgelöscht); Fahrten mit Wagenreihung bleiben (Fahrzeughistorie)
   delete from public.trips t where t.service_date < current_date - 30
     and not exists (select 1 from public.formations f where f.trip_id = t.id);
+  -- Webscanner: Verlauf 30 Tage, Züge ohne Wagenreihung 30 Tage, Läufe 14 Tage
+  delete from public.web_trains where service_date < current_date - 30 and vehicles is null;
+  delete from public.web_observations where observed_at < now() - interval '30 days';
+  delete from public.scan_runs where started_at < now() - interval '14 days';
   delete from public.collector_runs where started_at < now() - interval '7 days';
   delete from net._http_response where created < now() - interval '1 day';
   delete from cron.job_run_details where end_time < now() - interval '3 days';

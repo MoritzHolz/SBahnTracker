@@ -138,6 +138,22 @@ export function directionLabel(d: LiveTrip["direction"]): string {
   return "unbekannt";
 }
 
+/**
+ * Einheit zu einer Wagennummer: 423 810, 433 310 und 433 810 gehören zu 423 310, 431 537 zu 430 037.
+ * Gespeichert werden immer Einheiten. Regel an den Wagenlisten von bahn.expert geprüft (BR 423 und 430).
+ */
+export function unitNumber(input: string): string | null {
+  const n = normalizeVehicle(input);
+  const type = n && { "423": "423", "433": "423", "430": "430", "431": "430" }[n.slice(0, 3)];
+  if (!n || !type) return n;
+  return `${type} ${String(Number(n.slice(4)) % 500).padStart(3, "0")}`;
+}
+
+/** Zugnummer aus Eingaben wie „7172“, „S1 7172“, „S7172“ oder „Zug 7172“, sonst null. */
+export function parseTrainNumber(q: string): string | null {
+  return q.trim().match(/^(?:zug(?:nummer)?\s*)?(?:s\s*\d{0,2}(?:\s+|(?=\d{4,5}$)))?(\d{4,5})$/i)?.[1] ?? null;
+}
+
 /** Grobe Heuristik: sieht die Eingabe wie eine Fahrzeugnummer aus (z. B. „423 502“)? */
 export function looksLikeVehicleNumber(q: string): boolean {
   const s = q.trim().replace(/[\s.-]/g, "");
@@ -164,5 +180,50 @@ export function tripMatchesQuery(trip: LiveTrip, q: string): boolean {
     ...trip.stops.map((x) => x.station_name),
   ];
   if (hay.some((h) => h != null && String(h).toLowerCase().includes(s))) return true;
-  return (trip.formation?.vehicles ?? []).some((v) => String(v).replace(/\s+/g, "").toLowerCase().includes(compact));
+  const unit = unitNumber(s)?.replace(/\s+/g, "");
+  const hasVehicle = (trip.formation?.vehicles ?? []).some((v) => {
+    const id = String(v).replace(/\s+/g, "").toLowerCase();
+    return id.includes(compact) || id === unit;
+  });
+  if (hasVehicle || unit) return hasVehicle;
+  // „S1 7172“, „Zug 7172“, „7172 Kirchheim“: jedes Wort muss irgendwo vorkommen
+  const words = s.replace(/^(zug(nummer)?|s)\s*(?=\d{4,5}\b)/, "").replace(/^zug(nummer)?\s+/, "").split(/\s+/);
+  const wordHay = hay.filter((h) => h !== trip.trip_code && h != null).map((h) => String(h).toLowerCase());
+  return words.every((w) => wordHay.some((h) => h.includes(w)));
+}
+
+/** Normalisiert eine Fahrzeugnummer auf „423 502“ (6 Ziffern), sonst null. */
+export function normalizeVehicle(input: string): string | null {
+  const digits = input.replace(/\D/g, "");
+  return /^\d{6}$/.test(digits) ? `${digits.slice(0, 3)} ${digits.slice(3)}` : null;
+}
+
+/** Aktive Fahrten, in deren gemeldeter Wagenreihung die Nummer vorkommt. */
+export function tripsWithVehicle<T extends { formation: LiveTrip["formation"] }>(
+  trips: T[],
+  query: string,
+): { trip: T; vehicle: string }[] {
+  const q = query.replace(/\D/g, "");
+  const unit = unitNumber(query)?.replace(/\D/g, "");
+  // Vier- und fünfstellige Eingaben sind Zugnummern
+  if (q.length < 3 || parseTrainNumber(query)) return [];
+  const out: { trip: T; vehicle: string }[] = [];
+  for (const t of trips) {
+    const v = (t.formation?.vehicles ?? []).find((x) => {
+      const id = String(x).replace(/\D/g, "");
+      return id.includes(q) || id === unit;
+    });
+    if (v) out.push({ trip: t, vehicle: String(v) });
+  }
+  return out;
+}
+
+/** Stationsname für bahn.expert (Abfahrtstafel). */
+export function bahnExpertStationName(efaName: string): string {
+  if (/(hauptbahnhof|hbf)\.?\s*\(tief\)/i.test(efaName)) return "Stuttgart Hbf (tief)";
+  return efaName;
+}
+
+export function bahnExpertUrl(efaName: string): string {
+  return `https://bahn.expert/${encodeURIComponent(bahnExpertStationName(efaName))}`;
 }

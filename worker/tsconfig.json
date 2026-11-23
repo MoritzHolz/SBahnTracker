@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "es2023", "lib": ["es2023", "dom", "dom.iterable"], "module": "nodenext", "moduleResolution": "nodenext",
+    "strict": true, "noEmit": true, "allowImportingTsExtensions": true, "erasableSyntaxOnly": true, "skipLibCheck": true, "types": ["node"], "typeRoots": ["../node_modules/@types"]
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
+}

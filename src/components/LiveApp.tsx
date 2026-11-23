@@ -3,12 +3,14 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLiveData, useNow } from "@/hooks/useLiveData";
+import { useScannerStatus } from "@/hooks/useScanner";
 import { FALLBACK_LINE_COLOR, lineColor, lineTextColor } from "@/lib/api";
 import { TrackCache } from "@/lib/position";
 import { fmtRelative } from "@/lib/time";
-import { summarizeTrip, tripMatchesQuery, type TripStatus, type TripSummary } from "@/lib/trips";
+import { summarizeTrip, tripMatchesQuery, tripsWithVehicle, type TripStatus, type TripSummary } from "@/lib/trips";
+import { ScanNowButton } from "./panels/ScanNowButton";
 import { Sidebar, type Filters, type LineInfo } from "./panels/Sidebar";
-import { AppNav, Banner, isStale, SourceStatusBadge } from "./panels/StatusBar";
+import { AppNav, Banner, isStale, ScannerBadge, SourceStatusBadge } from "./panels/StatusBar";
 import { TrainDetail } from "./panels/TrainDetail";
 
 const LiveMap = dynamic(() => import("./map/LiveMap"), {
@@ -42,6 +44,10 @@ function matchesStatus(s: TripSummary, f: Filters["status"]): boolean {
 export default function LiveApp() {
   const data = useLiveData();
   const now = useNow(1000);
+  const [scanFast, setScanFast] = useState(false);
+  const { status: scanner, apply: applyScanner } = useScannerStatus(scanFast ? 3_000 : 20_000);
+  const scanBusy = scanner != null && (scanner.manual_pending || scanner.scan_state === "running");
+  useEffect(() => setScanFast(scanBusy), [scanBusy]);
   const [trackCache] = useState(() => new TrackCache());
 
   const [query, setQuery] = useState("");
@@ -139,6 +145,8 @@ export default function LiveApp() {
     [matching, hiddenLines, lineOrder],
   );
 
+  const vehicleHits = useMemo(() => tripsWithVehicle(data.trips, query), [data.trips, query]);
+
   const matchIds = useMemo(() => (filterActive ? new Set(matching.map((s) => s.trip.id)) : null), [filterActive, matching]);
 
   const selected = selectedId ? summaries.find((s) => s.trip.id === selectedId) ?? null : null;
@@ -227,9 +235,10 @@ export default function LiveApp() {
 
       {/* Datenquellenstatus */}
       <div
-        className={`absolute right-3 top-3 z-20 hidden transition-[right] duration-200 md:block ${selected ? "md:right-[424px]" : ""}`}
+        className={`absolute right-3 top-3 z-20 hidden flex-col items-end gap-1.5 transition-[right] duration-200 md:flex ${selected ? "md:right-[424px]" : ""}`}
       >
         <SourceStatusBadge status={data.status} tripCount={onMapCount} fetchedAt={data.fetchedAt} error={data.error} now={now} />
+        <ScannerBadge status={scanner} now={now} />
       </div>
 
       {/* Hinweis Schätzung */}
@@ -299,6 +308,8 @@ export default function LiveApp() {
             onSelect={select}
             lineStyle={lineStyle}
             loading={data.loading}
+            vehicleHits={vehicleHits}
+            scan={<ScanNowButton status={scanner} apply={applyScanner} now={now} onFinished={data.refresh} />}
           />
         </div>
       </aside>
@@ -310,14 +321,16 @@ export default function LiveApp() {
           className="anim-in absolute inset-x-0 bottom-0 z-30 h-[70dvh] overflow-hidden rounded-t-xl border border-line bg-[var(--panel)] backdrop-blur-md md:inset-x-auto md:bottom-3 md:right-3 md:top-3 md:h-auto md:w-[400px] md:rounded-lg"
         >
           <TrainDetail
+            key={selected.trip.id}
             summary={selected}
             track={selectedTrack}
             lineStyle={lineStyle(selected.trip.line_id)}
-            status={data.status}
+            scanner={scanner}
             now={now}
             follow={follow}
             onFollow={setFollow}
             onClose={() => select(null)}
+            onReported={data.refresh}
           />
         </aside>
       )}

@@ -1,3 +1,4 @@
+import { applyWebDelay, type WebInfo } from "./scanner";
 import { getSupabase } from "./supabase";
 
 /* ----------------------------------------------------------------------------
@@ -42,6 +43,10 @@ export interface LiveTrip {
   source: string | null;
   stops: TripStop[];
   formation: Formation | null;
+  /** Stand des Webscanners, falls die Fahrt dort erfasst wurde */
+  web?: WebInfo | null;
+  /** Verspätung stammt mangels EFA-Echtzeit vom Webscanner */
+  web_delay_applied?: boolean;
 }
 
 export interface RouteShape {
@@ -72,7 +77,7 @@ export interface SourceRun {
 export interface SourceStatus {
   live: SourceRun | null;
   last_ok: string | null;
-  formation_source: { available: boolean; note: string | null } | null;
+  formation_source: { available: boolean; manual_reporting?: boolean; note: string | null } | null;
 }
 
 export interface Vehicle {
@@ -83,6 +88,9 @@ export interface Vehicle {
   last_trip_id: string | null;
   last_station_name: string | null;
   status: string | null;
+  last_line_id?: string | null;
+  last_train_number?: string | number | null;
+  last_destination?: string | null;
 }
 
 export interface Parking {
@@ -99,6 +107,14 @@ export interface Sighting {
   trip_id: string | null;
   position_in_formation: number | null;
   source: string | null;
+  line_id?: string | null;
+  train_number?: string | number | null;
+  origin_name?: string | null;
+  destination_name?: string | null;
+  first_dep?: string | null;
+  last_arr?: string | null;
+  /** alle Einheiten der Meldung */
+  formation?: string[] | null;
 }
 
 export interface SplitEvent {
@@ -144,10 +160,10 @@ export async function fetchLiveTrips(now?: Date): Promise<LiveTrip[]> {
   const args = now ? { p_now: now.toISOString() } : {};
   const { data, error } = await getSupabase().rpc("get_live_trips", args);
   if (error) throw new Error(`get_live_trips: ${error.message}`);
-  return asArray<LiveTrip>(data).map((t) => ({
-    ...t,
-    stops: Array.isArray(t.stops) ? [...t.stops].sort((a, b) => a.seq - b.seq) : [],
-  }));
+  const at = now?.getTime() ?? Date.now();
+  return asArray<LiveTrip>(data).map((t) =>
+    applyWebDelay({ ...t, stops: Array.isArray(t.stops) ? [...t.stops].sort((a, b) => a.seq - b.seq) : [] }, at),
+  );
 }
 
 export async function fetchRouteShapes(): Promise<RouteShape[]> {
@@ -182,6 +198,59 @@ export async function searchVehicle(query: string): Promise<VehicleSearchResult[
     sightings: Array.isArray(r.sightings) ? r.sightings : [],
     splits: Array.isArray(r.splits) ? r.splits : [],
   }));
+}
+
+export interface TrainRun {
+  id: string;
+  line_id: string | null;
+  train_number: string | number | null;
+  origin_name: string | null;
+  destination_name: string | null;
+  first_dep: string | null;
+  last_arr: string | null;
+  formations: { vehicles: string[]; observed_at: string; station_name: string | null; source: string }[];
+}
+
+/** Fahrten einer Zugnummer, neueste zuerst (auch bereits beendete). */
+export async function searchTrain(trainNumber: string): Promise<TrainRun[]> {
+  const { data, error } = await getSupabase()
+    .from("trips")
+    .select("id,line_id,train_number,origin_name,destination_name,first_dep,last_arr,formations(vehicles,observed_at,station_name,source)")
+    .eq("train_number", trainNumber)
+    .order("first_dep", { ascending: false })
+    .limit(10);
+  if (error) throw new Error(`trips: ${error.message}`);
+  return ((data ?? []) as unknown as TrainRun[]).map((t) => ({
+    ...t,
+    formations: [...(t.formations ?? [])].filter((f) => f.vehicles?.length).sort((a, b) => Date.parse(b.observed_at) - Date.parse(a.observed_at)),
+  }));
+}
+
+export type ReportResult =
+  | { ok: true; formationId: number | string; vehicles: string[] }
+  | { ok: false; error: string };
+
+/**
+ * Manuelle Meldung einer Wagenreihung. Fachliche Fehler (PIN falsch, ungültige
+ * Nummer …) kommen vom Backend als {error} und werden durchgereicht.
+ */
+export async function reportFormation(
+  pin: string,
+  tripId: string,
+  vehicles: string[],
+  stationId: string | null,
+): Promise<ReportResult> {
+  const { data, error } = await getSupabase().rpc("report_formation", {
+    p_pin: pin,
+    p_trip_id: tripId,
+    p_vehicles: vehicles,
+    p_station_id: stationId,
+  });
+  if (error) return { ok: false, error: "Meldung konnte nicht übertragen werden. Bitte erneut versuchen." };
+  const d = asObject<{ error?: string; formation_id?: number | string; vehicles?: string[] }>(data);
+  if (!d) return { ok: false, error: "Unerwartete Antwort vom Server." };
+  if (d.error) return { ok: false, error: d.error };
+  return { ok: true, formationId: d.formation_id ?? "", vehicles: Array.isArray(d.vehicles) ? d.vehicles : vehicles };
 }
 
 export async function fetchLines(): Promise<Line[]> {

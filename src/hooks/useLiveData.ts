@@ -30,6 +30,8 @@ export interface LiveData {
   loading: boolean;
   /** Fehler bei Trips/Status (für Banner) */
   error: string | null;
+  /** Trips + Status sofort neu laden */
+  refresh: () => void;
 }
 
 function useInterval(fn: () => void, ms: number) {
@@ -97,8 +99,8 @@ export function useLiveData(): LiveData {
     });
   }, []);
 
-  /* Trips + Status alle 30 s */
-  useInterval(() => {
+  /* Trips + Status alle 30 s (und auf Anforderung, z. B. nach einer Meldung) */
+  const loadTrips = useCallback(() => {
     latest(
       "trips",
       fetchLiveTrips(),
@@ -122,7 +124,8 @@ export function useLiveData(): LiveData {
       },
       (e) => setErr("status", e.message),
     );
-  }, TRIPS_INTERVAL_MS);
+  }, [latest, setErr]);
+  useInterval(loadTrips, TRIPS_INTERVAL_MS);
 
   /* Linien selten */
   useInterval(() => {
@@ -160,7 +163,7 @@ export function useLiveData(): LiveData {
   const lines = useMemo(() => new Map(lineList.map((l) => [l.id, l])), [lineList]);
   const error = [errors.trips, errors.status].filter(Boolean).join(" · ") || null;
 
-  return { trips, shapes, shapeList, lines, lineList, status, fetchedAt, loading, error };
+  return { trips, shapes, shapeList, lines, lineList, status, fetchedAt, loading, error, refresh: loadTrips };
 }
 
 /** Tick für UI-Aktualisierungen (Listen, relative Zeiten). */

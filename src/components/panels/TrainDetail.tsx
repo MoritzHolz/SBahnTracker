@@ -1,10 +1,15 @@
 "use client";
 
+import Link from "next/link";
+import { useState } from "react";
 import { DataBadge, Delay, Kv, LineBadge, Platform } from "@/components/ui/Badges";
-import type { SourceStatus, TripStop } from "@/lib/api";
+import type { TripStop } from "@/lib/api";
 import { DEFAULT_TRAIN_LENGTH_M, positionQuality, QUALITY_LABEL, trainLengthM, type Track } from "@/lib/position";
+import { MISSING_LABEL, QUALITY_TEXT, webSeenState, type ScannerStatus } from "@/lib/scanner";
 import { delayMinutes, fmtRelative, fmtTime } from "@/lib/time";
+import { ReportFormation } from "./ReportFormation";
 import {
+  bahnExpertUrl,
   directionLabel,
   endStopIndex,
   platformInfo,
@@ -19,11 +24,13 @@ interface Props {
   summary: TripSummary;
   track: Track | null;
   lineStyle: { color: string; textColor: string };
-  status: SourceStatus | null;
+  scanner: ScannerStatus | null;
   now: number;
   follow: boolean;
   onFollow: (v: boolean) => void;
   onClose: () => void;
+  /** nach erfolgreicher Meldung (Daten neu laden) */
+  onReported: () => void;
 }
 
 function statusSentence(s: TripSummary): string {
@@ -47,7 +54,9 @@ function statusSentence(s: TripSummary): string {
   }
 }
 
-export function TrainDetail({ summary: s, track, lineStyle, status, now, follow, onFollow, onClose }: Props) {
+export function TrainDetail({ summary: s, track, lineStyle, scanner, now, follow, onFollow, onClose, onReported }: Props) {
+  const [reporting, setReporting] = useState(false);
+  const [justReported, setJustReported] = useState<string[] | null>(null);
   const t = s.trip;
   const quality = positionQuality(t);
   const rt = realtimeState(t, now);
@@ -55,7 +64,11 @@ export function TrainDetail({ summary: s, track, lineStyle, status, now, follow,
   const endIdx = endStopIndex(t);
   const KIND_LABEL = { est: "Echtzeit", derived: "Prognose (abgeleitet)", plan: "Plan" } as const;
   const states = stopStates(t, s);
-  const vehicles = t.formation?.vehicles ?? [];
+  const vehicles = (t.formation?.vehicles ?? []).map(String);
+  const manualFormation = !t.formation?.source || t.formation.source === "manual";
+  // bahn.expert: aktueller Halt (wenn der Zug steht), sonst nächster Halt
+  const expertStop =
+    s.status === "am_halt" || s.status === "vor_abfahrt" ? s.lastStop : s.nextStop ?? s.lastStop ?? t.stops[0] ?? null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -179,36 +192,125 @@ export function TrainDetail({ summary: s, track, lineStyle, status, now, follow,
           </Kv>
         </dl>
 
+        {/* Webscanner */}
+        {t.web && (
+          <section className="border-b border-line px-5 py-3">
+            <h3 className="mb-1 flex items-center justify-between text-[10px] font-medium uppercase tracking-[0.12em] text-faint">
+              Webscanner
+              {webSeenState(t.web, scanner, now) === "erfasst" ? (
+                <DataBadge state="live" label="Im letzten Scan" />
+              ) : (
+                <DataBadge state="zuletzt" label="Zuletzt gesehen" />
+              )}
+            </h3>
+            <dl>
+              <Kv k="Erfasst">
+                {fmtRelative(t.web.last_seen_at, now)} <span className="text-faint">· {t.web.source}</span>
+              </Kv>
+              <Kv k={`Ab ${t.web.board_station_name.replace("Stuttgart", "").trim()}`}>
+                {t.web.cancelled ? <span className="text-bad">Ausfall gemeldet</span> : <Delay minutes={t.web.delay_min} />}
+                <span className="text-muted"> · {t.web.platform ? `Gl. ${t.web.platform}` : "Gleis nicht verfügbar"}</span>
+              </Kv>
+              {t.web.message && <Kv k="Meldung">{t.web.message}</Kv>}
+              <Kv k="Datenqualität">
+                {QUALITY_TEXT[t.web.quality]}
+                {t.web.missing.length > 0 && (
+                  <span className="block text-[11px] text-faint">Nicht verfügbar: {t.web.missing.map((m) => MISSING_LABEL[m] ?? m).join(", ")}</span>
+                )}
+              </Kv>
+            </dl>
+            {t.source === "web_dbf" && (
+              <p className="mt-1 text-[11px] text-warn">Nur vom Webscanner bekannt. Fahrzeiten von einer Fahrt mit gleicher Haltfolge übertragen (geschätzt).</p>
+            )}
+            {t.web_delay_applied && <p className="mt-1 text-[11px] text-faint">Verspätung dieser Fahrt stammt vom Webscanner.</p>}
+          </section>
+        )}
+
         {/* Fahrzeuge */}
         <section className="border-b border-line px-5 py-3">
           <h3 className="mb-2 flex items-center justify-between text-[10px] font-medium uppercase tracking-[0.12em] text-faint">
-            Fahrzeuge / Wagenreihung
-            {vehicles.length > 0 ? <DataBadge state="zuletzt" /> : <DataBadge state="na" />}
+            Fahrzeuge
+            {vehicles.length > 0 ? (
+              <DataBadge
+                state="zuletzt"
+                label={manualFormation ? "Gemeldet" : "Webscanner"}
+                title={manualFormation ? "Manuell gemeldete Wagenreihung" : `Wagenreihung von ${t.formation?.source}`}
+              />
+            ) : (
+              <DataBadge state="na" />
+            )}
           </h3>
           {vehicles.length > 0 ? (
             <div>
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-wrap items-center gap-1">
                 {vehicles.map((v, i) => (
-                  <a
-                    key={`${v}-${i}`}
-                    href={`/fahrzeuge?q=${encodeURIComponent(v)}`}
-                    className="tnum rounded border border-line px-1.5 py-0.5 text-[12px] hover:border-[var(--line-strong)]"
-                  >
-                    {v}
-                  </a>
+                  <span key={`${v}-${i}`} className="flex items-center gap-1">
+                    {i > 0 && <span className="text-faint">·</span>}
+                    <Link
+                      href={`/fahrzeuge?q=${encodeURIComponent(v)}`}
+                      className="tnum rounded border border-line px-1.5 py-0.5 text-[12.5px] hover:border-[var(--line-strong)]"
+                      title={`Fahrtenbuch von ${v}`}
+                    >
+                      {v}
+                    </Link>
+                  </span>
                 ))}
               </div>
               <p className="mt-1.5 text-[11px] text-faint">
-                Erfasst {fmtRelative(t.formation?.observed_at, now)}
-                {t.formation?.station_name ? ` in ${t.formation.station_name}` : ""}
-                {t.formation?.source ? ` · ${t.formation.source}` : ""}
+                {manualFormation ? "gemeldet" : "erfasst"} {fmtTime(t.formation?.observed_at)}
+                {t.formation?.station_name ? ` an ${t.formation.station_name}` : ""}
+                {manualFormation ? " (manuell)" : ` (${t.formation?.source})`}
               </p>
             </div>
           ) : (
             <p className="text-[12px] leading-relaxed text-muted">
-              Fahrzeugnummern und Wagenreihung sind für diese Fahrt nicht verfügbar.
-              {status?.formation_source?.note && <span className="mt-1 block text-faint">{status.formation_source.note}</span>}
+              Für diese Fahrt ist noch keine Fahrzeugnummer erfasst.
             </p>
+          )}
+
+          {justReported && !reporting && (
+            <p role="status" className="anim-in mt-2 rounded border border-ok/30 bg-ok/10 px-2 py-1.5 text-[12px] text-ok">
+              Danke! Gemeldet: {justReported.join(" · ")}
+            </p>
+          )}
+
+          {reporting ? (
+            <ReportFormation
+              trip={t}
+              defaultStopIdx={s.position ? s.position.lastIdx : null}
+              onCancel={() => setReporting(false)}
+              onDone={(v) => {
+                setReporting(false);
+                setJustReported(v);
+                onReported();
+              }}
+            />
+          ) : (
+            <button
+              onClick={() => {
+                setJustReported(null);
+                setReporting(true);
+              }}
+              className="mt-2.5 h-7 rounded-md border border-[var(--line-strong)] px-2.5 text-[12px] text-fg hover:bg-white/5"
+            >
+              {vehicles.length > 0 ? "Fahrzeuge korrigieren" : "Fahrzeug melden"}
+            </button>
+          )}
+
+          {expertStop && (
+            <div className="mt-3 flex flex-wrap items-center gap-x-2 text-[11.5px] text-muted">
+              <a
+                href={bahnExpertUrl(expertStop.station_name)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent hover:underline"
+              >
+                Auf bahn.expert nachsehen ↗
+              </a>
+              <span className="text-faint">
+                Zug {t.line_id} {t.train_number ?? ""} suchen
+              </span>
+            </div>
           )}
         </section>
 

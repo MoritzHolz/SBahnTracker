@@ -20,6 +20,7 @@ const eslintConfig = [
       "next-env.d.ts",
       "public/maplibre/**",
       "supabase/**",
+      "worker/node_modules/**",
     ],
   },
 ];

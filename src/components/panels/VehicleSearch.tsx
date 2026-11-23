@@ -1,12 +1,26 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
-import { DataBadge } from "@/components/ui/Badges";
+import { useCallback, useEffect, useState } from "react";
+import { DataBadge, LineBadge } from "@/components/ui/Badges";
 import { useNow } from "@/hooks/useLiveData";
-import { fetchSourceStatus, searchVehicle, type SourceStatus, type VehicleSearchResult } from "@/lib/api";
-import { fmtDateTime, fmtRelative } from "@/lib/time";
+import { useScannerStatus } from "@/hooks/useScanner";
+import {
+  fetchLines,
+  FALLBACK_LINE_COLOR,
+  searchTrain,
+  searchVehicle,
+  type Line,
+  type TrainRun,
+  type VehicleSearchResult,
+} from "@/lib/api";
+import { fmtDateTime, fmtRelative, fmtTime } from "@/lib/time";
+import { parseTrainNumber, unitNumber } from "@/lib/trips";
+import { ScanNowButton } from "./ScanNowButton";
 import { AppNav } from "./StatusBar";
+
+type LineStyleFn = (id: string) => { color: string; textColor: string };
 
 function fmtConfidence(c: number | null | undefined): string {
   if (c == null || !Number.isFinite(c)) return "unbekannt";
@@ -17,7 +31,7 @@ function fmtConfidence(c: number | null | undefined): string {
 type State =
   | { kind: "idle" }
   | { kind: "loading"; q: string }
-  | { kind: "done"; q: string; results: VehicleSearchResult[] }
+  | { kind: "done"; q: string; results: VehicleSearchResult[]; unit: string | null; train: string | null; runs: TrainRun[] }
   | { kind: "error"; q: string; message: string };
 
 export function VehicleSearch() {
@@ -26,12 +40,26 @@ export function VehicleSearch() {
   const initial = params.get("q") ?? "";
   const [input, setInput] = useState(initial);
   const [state, setState] = useState<State>({ kind: "idle" });
-  const [status, setStatus] = useState<SourceStatus | null>(null);
-  const now = useNow(30_000);
+  const now = useNow(1_000);
+  const { status: scanner, apply } = useScannerStatus(3_000);
+  const [reload, setReload] = useState(0);
+  const onScanned = useCallback(() => setReload((n) => n + 1), []);
 
+  const [lines, setLines] = useState<Map<string, Line>>(() => new Map());
   useEffect(() => {
-    fetchSourceStatus().then(setStatus).catch(() => setStatus(null));
+    fetchLines()
+      .then((l) => setLines(new Map(l.map((x) => [x.id, x]))))
+      .catch(() => undefined);
   }, []);
+  const lineStyle: LineStyleFn = (id) => ({
+    color: lines.get(id)?.color || FALLBACK_LINE_COLOR,
+    textColor: lines.get(id)?.text_color || "#ffffff",
+  });
+
+  // Bei Navigation mit neuem ?q= das Eingabefeld nachziehen
+  useEffect(() => {
+    setInput(initial);
+  }, [initial]);
 
   useEffect(() => {
     const q = initial.trim();
@@ -40,22 +68,23 @@ export function VehicleSearch() {
       return;
     }
     let cancelled = false;
-    setState({ kind: "loading", q });
-    searchVehicle(q)
-      .then((results) => !cancelled && setState({ kind: "done", q, results }))
+    // Nach einem Scan still aktualisieren, statt das Ergebnis kurz auszublenden
+    setState((prev) => (prev.kind === "done" && prev.q === q ? prev : { kind: "loading", q }));
+    const train = parseTrainNumber(q);
+    const unit = unitNumber(q);
+    Promise.all([train ? Promise.resolve([]) : searchVehicle(unit ?? q), train ? searchTrain(train) : Promise.resolve([])])
+      .then(([results, runs]) => !cancelled && setState({ kind: "done", q, results, unit, train, runs }))
       .catch((e: Error) => !cancelled && setState({ kind: "error", q, message: e.message }));
     return () => {
       cancelled = true;
     };
-  }, [initial]);
+  }, [initial, reload]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const q = input.trim();
     router.replace(q ? `/fahrzeuge?q=${encodeURIComponent(q)}` : "/fahrzeuge");
   };
-
-  const formationAvailable = status?.formation_source?.available ?? false;
 
   return (
     <main className="min-h-dvh bg-bg text-fg">
@@ -68,26 +97,23 @@ export function VehicleSearch() {
       <div className="mx-auto max-w-3xl px-5 py-8">
         <h1 className="text-xl font-semibold tracking-tight">Fahrzeugsuche</h1>
         <p className="mt-1 max-w-xl text-[13px] leading-relaxed text-muted">
-          Suche nach einer Fahrzeugnummer (z. B. „423 502“). Gezeigt werden Sichtungen in Wagenreihungen, ein
+          Suche nach einer Fahrzeugnummer (z. B. „423 310“, auch Wagennummern wie „423 810“) oder einer Zugnummer (z. B. „7172“). Gezeigt werden Sichtungen in Wagenreihungen, ein
           vermuteter Abstellort und mögliche Zugtrennungen.
         </p>
 
-        {!formationAvailable && (
-          <div className="mt-4 rounded-md border border-line px-3 py-2.5 text-[12px] leading-relaxed text-muted">
-            <div className="mb-1 flex items-center gap-2">
-              <DataBadge state="na" label="Quelle nicht angebunden" />
-            </div>
-            Aktuell ist keine Datenquelle für Fahrzeugnummern bzw. Wagenreihungen angebunden. Die Suche funktioniert
-            technisch, liefert aber voraussichtlich keine Treffer.
-            {status?.formation_source?.note && <span className="mt-1 block text-faint">{status.formation_source.note}</span>}
+        <div className="mt-4 rounded-md border border-line px-3 py-2.5 text-[12px] leading-relaxed text-muted">
+          <div className="mb-1 flex items-center gap-2">
+            <DataBadge state="zuletzt" label="Webscanner und eigene Meldungen" />
           </div>
-        )}
+          Fahrzeugnummern stammen vom Webscanner (nur wenn eingeschaltet) und aus eigenen Meldungen über einen Zug
+          auf der Karte („Fahrzeug melden“). Abstellorte und Zugtrennungen sind daraus abgeleitete Vermutungen.
+        </div>
 
         <form onSubmit={submit} className="mt-6 flex gap-2">
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Fahrzeugnummer, z. B. 423 502"
+            placeholder="Fahrzeug- oder Zugnummer, z. B. 423 310 oder 7172"
             className="tnum h-10 min-w-0 flex-1 rounded-md border border-line bg-black/30 px-3 text-[14px] placeholder:text-faint focus:border-[var(--line-strong)] focus:outline-none"
             autoFocus
           />
@@ -98,30 +124,92 @@ export function VehicleSearch() {
             Suchen
           </button>
         </form>
+        <div className="mt-3 max-w-xs">
+          <ScanNowButton status={scanner} apply={apply} now={now} onFinished={onScanned} />
+        </div>
 
         <div className="mt-8">
           {state.kind === "loading" && <p className="text-[13px] text-faint">Suche „{state.q}“ …</p>}
           {state.kind === "error" && (
             <p className="text-[13px] text-bad">Die Suche ist fehlgeschlagen: {state.message}</p>
           )}
-          {state.kind === "done" && state.results.length === 0 && (
+          {state.kind === "done" && state.unit && state.unit.replace(/\D/g, "") !== state.q.replace(/\D/g, "") && (
+            <p className="mb-4 text-[12px] text-muted">
+              {state.q} ist ein Wagen der Einheit <span className="tnum text-fg">{state.unit}</span>.
+            </p>
+          )}
+          {state.kind === "done" && state.train && <TrainRuns train={state.train} runs={state.runs} now={now} lineStyle={lineStyle} />}
+          {state.kind === "done" && !state.train && state.results.length === 0 && (
             <div className="rounded-md border border-dashed border-line px-4 py-6 text-[13px] leading-relaxed text-muted">
               <p className="text-fg">Kein Fahrzeug „{state.q}“ gefunden.</p>
-              <p className="mt-1">
-                {formationAvailable
-                  ? "Für diese Nummer liegen keine Sichtungen vor. Prüfe die Schreibweise (Baureihe + Ordnungsnummer, z. B. 423 502)."
-                  : "Das ist derzeit zu erwarten: Ohne angebundene Wagenreihungsquelle werden keine Fahrzeuge erfasst. Sobald eine Quelle verfügbar ist, erscheinen hier Sichtungen."}
-              </p>
+              <Link href="/" className="mt-2 inline-block text-[12px] text-accent hover:underline">
+                Zur Karte
+              </Link>
+              <p className="mt-1">Dieses Fahrzeug wurde noch nicht erfasst. Je Scan werden die Fahrzeuge von bis zu 25 Zügen gelesen, die rund um die Scanzeit am Hbf (tief) fahren. Scanne noch einmal oder melde es über einen Zug auf der Karte.</p>
             </div>
           )}
-          {state.kind === "done" && state.results.map((r) => <VehicleProfile key={r.vehicle.id} r={r} now={now} />)}
+          {state.kind === "done" && state.results.map((r) => <VehicleProfile key={r.vehicle.id} r={r} now={now} lineStyle={lineStyle} />)}
         </div>
       </div>
     </main>
   );
 }
 
-function VehicleProfile({ r, now }: { r: VehicleSearchResult; now: number }) {
+function TrainRuns({ train, runs, now, lineStyle }: { train: string; runs: TrainRun[]; now: number; lineStyle: LineStyleFn }) {
+  return (
+    <section>
+      <h2 className="tnum text-2xl font-semibold tracking-tight">Zug {train}</h2>
+      {runs.length === 0 ? (
+        <p className="mt-3 text-[13px] text-muted">Keine Fahrt mit dieser Zugnummer erfasst.</p>
+      ) : (
+        <ol className="mt-4 divide-y divide-[var(--line)] border-y border-line">
+          {runs.map((t) => {
+            const f = t.formations[0];
+            const active = t.first_dep && t.last_arr && Date.parse(t.first_dep) <= now && now <= Date.parse(t.last_arr) + 10 * 60_000;
+            return (
+              <li key={t.id} className="grid grid-cols-1 gap-1 py-2.5 text-[13px] sm:grid-cols-[8.5rem_1fr]">
+                <span className="tnum text-muted">{fmtDateTime(t.first_dep)}</span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {t.line_id && <LineBadge id={t.line_id} {...lineStyle(t.line_id)} size="sm" />}
+                    <span>
+                      {t.origin_name ?? "–"} → {t.destination_name ?? "–"}
+                    </span>
+                    {active && <span className="text-[12px] text-ok">unterwegs</span>}
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap gap-x-2 text-[12px] text-faint">
+                    {f ? (
+                      <>
+                        <span>
+                          Fahrzeuge{" "}
+                          {f.vehicles.map((v, i) => (
+                            <span key={v}>
+                              {i > 0 && ", "}
+                              <Link href={`/fahrzeuge?q=${encodeURIComponent(v)}`} className="tnum text-fg hover:underline">
+                                {v}
+                              </Link>
+                            </span>
+                          ))}
+                        </span>
+                        <span>
+                          {f.station_name ?? "Ort unbekannt"}, {fmtTime(f.observed_at)} · {f.source === "manual" ? "manuell gemeldet" : f.source}
+                        </span>
+                      </>
+                    ) : (
+                      <span>Fahrzeugnummer nicht erfasst</span>
+                    )}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
+  );
+}
+
+function VehicleProfile({ r, now, lineStyle }: { r: VehicleSearchResult; now: number; lineStyle: LineStyleFn }) {
   const v = r.vehicle;
   const sightings = [...r.sightings].sort((a, b) => Date.parse(b.observed_at) - Date.parse(a.observed_at));
   const splits = [...r.splits].sort((a, b) => Date.parse(b.detected_at) - Date.parse(a.detected_at));
@@ -131,6 +219,21 @@ function VehicleProfile({ r, now }: { r: VehicleSearchResult; now: number }) {
         <h2 className="tnum text-2xl font-semibold tracking-tight">{v.id}</h2>
         <span className="text-[12px] text-muted">{v.vehicle_type_id ? `Baureihe ${v.vehicle_type_id}` : "Baureihe unbekannt"}</span>
       </div>
+      {v.last_line_id && (
+        <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[13px] text-muted">
+          <span>zuletzt als</span>
+          <LineBadge id={v.last_line_id} {...lineStyle(v.last_line_id)} size="sm" />
+          <span className="text-fg">
+            Zug {v.last_train_number ?? "–"} → {v.last_destination ?? "–"}
+          </span>
+          {v.last_seen && (
+            <span>
+              , {fmtTime(v.last_seen)}
+              {v.last_station_name ? ` an ${v.last_station_name}` : ""}
+            </span>
+          )}
+        </p>
+      )}
 
       <dl className="mt-4 grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
         <Field k="Status">{v.status ?? "unbekannt"}</Field>
@@ -181,19 +284,42 @@ function VehicleProfile({ r, now }: { r: VehicleSearchResult; now: number }) {
           <p className="text-[12px] text-muted">Keine Sichtungen erfasst.</p>
         ) : (
           <ol className="divide-y divide-[var(--line)] border-y border-line">
-            {sightings.map((s, i) => (
-              <li key={`${s.observed_at}-${i}`} className="grid grid-cols-[9rem_1fr_auto] gap-3 py-2 text-[13px]">
-                <span className="tnum text-muted">{fmtDateTime(s.observed_at)}</span>
-                <span className="min-w-0 truncate">
-                  {s.station_name ?? "–"}
-                  {s.trip_id && <span className="text-faint"> · Fahrt {s.trip_id}</span>}
-                </span>
-                <span className="tnum text-[12px] text-faint">
-                  {s.position_in_formation != null ? `Pos. ${s.position_in_formation}` : ""}
-                  {s.source ? ` · ${s.source}` : ""}
-                </span>
-              </li>
-            ))}
+            {sightings.map((s, i) => {
+              const others = (s.formation ?? []).map(String).filter((x) => x !== v.id);
+              return (
+                <li key={`${s.observed_at}-${i}`} className="grid grid-cols-1 gap-1 py-2.5 text-[13px] sm:grid-cols-[8.5rem_1fr]">
+                  <span className="tnum text-muted">{fmtDateTime(s.observed_at)}</span>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {s.line_id && <LineBadge id={s.line_id} {...lineStyle(s.line_id)} size="sm" />}
+                      <span className="tnum">Zug {s.train_number ?? "–"}</span>
+                      {(s.origin_name || s.destination_name) && (
+                        <span className="text-muted">
+                          {s.origin_name ?? "–"} → {s.destination_name ?? "–"}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap gap-x-2 text-[12px] text-faint">
+                      <span>gesehen an {s.station_name ?? "unbekannt"}</span>
+                      {others.length > 0 && (
+                        <span>
+                          mit{" "}
+                          {others.map((o, j) => (
+                            <span key={o}>
+                              {j > 0 && ", "}
+                              <Link href={`/fahrzeuge?q=${encodeURIComponent(o)}`} className="tnum text-muted hover:text-fg">
+                                {o}
+                              </Link>
+                            </span>
+                          ))}
+                        </span>
+                      )}
+                      <span>{s.source === "manual" || !s.source ? "manuell gemeldet" : s.source}</span>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
           </ol>
         )}
       </section>

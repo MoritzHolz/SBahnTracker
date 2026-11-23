@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { SourceStatus } from "@/lib/api";
+import type { ScannerStatus } from "@/lib/scanner";
 import { fmtRelative, fmtTimeSec } from "@/lib/time";
 
 export const STALE_AFTER_MS = 10 * 60_000;
@@ -10,6 +11,29 @@ export function isStale(status: SourceStatus | null, now: number): boolean {
   if (!status) return false; // noch nicht geladen
   const t = status.last_ok ? Date.parse(status.last_ok) : NaN;
   return !Number.isFinite(t) || now - t > STALE_AFTER_MS;
+}
+
+/** Kurzstatus des Webscanners auf der Karte (Steuerung unter /scanner). */
+export function ScannerBadge({ status, now }: { status: ScannerStatus | null; now: number }) {
+  if (!status) return null;
+  const tone = { running: "bg-accent pulse-dot", waiting: "bg-ok", error: "bg-bad", off: "bg-faint" }[status.scan_state];
+  const text =
+    status.scan_state === "running"
+      ? "Scan läuft"
+      : !status.enabled
+        ? "AUS"
+        : status.scan_state === "error"
+          ? status.worker_online ? "Fehler" : "Worker offline"
+          : `EIN · Scan ${status.last_success_at ? fmtRelative(status.last_success_at, now) : "steht aus"}`;
+  return (
+    <Link
+      href="/scanner"
+      className="flex items-center gap-2 rounded-md border border-line bg-[var(--panel)] px-2.5 py-1.5 text-[11px] text-muted backdrop-blur-md hover:text-fg"
+    >
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone}`} />
+      Webscanner <span className="tnum text-fg">{text}</span>
+    </Link>
+  );
 }
 
 /** Kompakte Anzeige des Datenquellenstatus. */
@@ -70,11 +94,11 @@ export function Banner({ tone, children }: { tone: "warn" | "bad"; children: Rea
   );
 }
 
-export function AppNav({ active }: { active: "karte" | "fahrzeuge" }) {
-  const item = (key: "karte" | "fahrzeuge", href: string, label: string) => (
+export function AppNav({ active }: { active: "karte" | "fahrzeuge" | "scanner" }) {
+  const item = (key: "karte" | "fahrzeuge" | "scanner", href: string, label: string) => (
     <Link
       href={href}
-      className={`rounded px-2 py-1 text-[12px] transition-colors ${
+      className={`rounded px-1.5 py-1 text-[12px] transition-colors ${
         active === key ? "bg-white/[0.07] text-fg" : "text-muted hover:text-fg"
       }`}
     >
@@ -88,13 +112,14 @@ export function AppNav({ active }: { active: "karte" | "fahrzeuge" }) {
           <circle cx="10" cy="10" r="8.5" fill="none" stroke="var(--ok)" strokeWidth="1.5" />
           <path d="M7 6.5h4.2a2.3 2.3 0 0 1 0 4.6H8.8a2.3 2.3 0 0 0 0 4.6H13" fill="none" stroke="var(--fg)" strokeWidth="1.6" strokeLinecap="round" />
         </svg>
-        <span className="text-[13px] font-semibold tracking-tight">
-          S-Bahn Stuttgart <span className="font-normal text-muted">Live</span>
+        <span className="whitespace-nowrap text-[13px] font-semibold tracking-tight">
+          S-Bahn Stuttgart{active !== "karte" && <span className="font-normal text-muted"> Live</span>}
         </span>
       </Link>
       <nav className="flex items-center gap-0.5">
         {item("karte", "/", "Karte")}
         {item("fahrzeuge", "/fahrzeuge", "Fahrzeuge")}
+        {item("scanner", "/scanner", "Scanner")}
       </nav>
     </div>
   );
