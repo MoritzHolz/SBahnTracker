@@ -66,7 +66,7 @@ Schlüssel (liegen nur in `worker/.env`, in der Datenbank stehen nur Hashes):
 npm run scanner:keys
 ```
 
-Das ausgegebene SQL im Supabase SQL Editor ausführen. `SCANNER_CONTROL_KEY` aus `worker/.env` ist der Schlüssel fürs Dashboard.
+Das ausgegebene SQL im Supabase SQL Editor ausführen. `SCANNER_CONTROL_KEY` aus `worker/.env` nutzt nur der lokale Webserver. Im Dashboard reicht die Anmeldung.
 
 **Mac:** Autostart einrichten, `uninstall` entfernt ihn wieder.
 
@@ -89,4 +89,4 @@ Mit `npm run dev` gibt es auf der Karte, in der Fahrzeugsuche und unter `/scanne
 - `src/app/api/scanner/route.ts` liest `SCANNER_CONTROL_KEY` auf dem Server aus `worker/.env`. Der Schlüssel wird nie an den Browser gesendet.
 - Ist kein Worker online, startet der Knopf (oder EIN) ihn. Das Öffnen einer Seite startet nichts. Der Worker endet mit dem Webserver.
 - Die Route gilt nur im Entwicklungsserver und nur für Anfragen der eigenen Seite vom selben Rechner (Host, Origin, Absender). `npm run dev` lauscht nur auf `localhost`.
-- In einem veröffentlichten Build ist die Route abgeschaltet. Dort gilt weiter der Steuerschlüssel, und der Worker muss separat laufen.
+- In einem veröffentlichten Build ist die Route abgeschaltet. Dort steuert jedes angemeldete Konto den Scanner, und der Worker muss separat laufen.

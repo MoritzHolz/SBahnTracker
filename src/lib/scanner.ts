@@ -83,11 +83,13 @@ export type ScannerAction = "check" | "enable" | "disable" | "scan_now" | "set_i
 export async function fetchScannerStatus(): Promise<ScannerStatus> {
   const { data, error } = await getSupabase().rpc("scanner_status");
   if (error) throw new Error(`scanner_status: ${error.message}`);
+  if (!data) throw new Error("Nicht angemeldet.");
   return data as ScannerStatus;
 }
 
-export async function scannerControl(key: string, action: ScannerAction, value?: number): Promise<ScannerStatus> {
-  const { data, error } = await getSupabase().rpc("scanner_control", { p_key: key.trim(), p_action: action, p_value: value ?? null });
+/** key nur für den lokalen Webserver; angemeldete Konten brauchen keinen. */
+export async function scannerControl(key: string | null, action: ScannerAction, value?: number): Promise<ScannerStatus> {
+  const { data, error } = await getSupabase().rpc("scanner_control", { p_key: key ?? "", p_action: action, p_value: value ?? null });
   if (error) throw new Error(error.message);
   const r = data as { ok: boolean; error?: string; status?: ScannerStatus };
   if (!r.ok || !r.status) throw new Error(r.error ?? "Unbekannter Fehler");

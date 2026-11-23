@@ -49,8 +49,7 @@ function countdown(iso: string | null, now: number): string {
 export function ScannerPanel() {
   const { status: s, error, apply } = useScannerStatus(3_000);
   const now = useNow(1000);
-  const { mode, busy, msg: controlMsg, send, unlock, lock } = useScannerControl(apply);
-  const [input, setInput] = useState("");
+  const { mode, busy, msg: controlMsg, send } = useScannerControl(apply);
   const [loadMsg, setLoadMsg] = useState<string | null>(null);
   const msg = controlMsg ?? loadMsg;
   const [trains, setTrains] = useState<WebTrain[]>([]);
@@ -76,7 +75,7 @@ export function ScannerPanel() {
   );
   const current = rows.filter((r) => r.seen === "erfasst").length;
   const run = s?.scan_state === "running" ? s.recent_runs[0] : s?.last_run ?? null;
-  const locked = mode === "checking" || mode === "locked";
+  const locked = mode === "checking";
   const local = mode === "local";
   const scanRunning = s?.scan_state === "running" && s.worker_online;
 
@@ -154,7 +153,7 @@ export function ScannerPanel() {
               {!s.worker_online && !local && (
                 <p role="alert" className="mt-4 rounded-md border border-bad/40 bg-bad/10 px-3 py-2 text-[12px] leading-relaxed text-[#ffb4b4]">
                   Der Worker ist nicht erreichbar{s.heartbeat_at ? ` (zuletzt ${fmtRelative(s.heartbeat_at, now)})` : ""}. Es wird nichts erfasst.
-                  Starte ihn mit <code className="font-mono">npm run scanner</code>.
+                  Starte ihn auf deinem Mac mit <code className="font-mono">npm run scanner</code>.
                 </p>
               )}
               {s.manual_pending && s.worker_online && (
@@ -164,31 +163,7 @@ export function ScannerPanel() {
                 <p className="mt-3 text-[12px] text-muted">Einmaliger Scan. Der Scanner bleibt danach AUS.</p>
               )}
 
-              {mode === "checking" ? null : locked ? (
-                <form
-                  className="mt-4 flex flex-wrap gap-2 border-t border-line pt-4"
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    if (await unlock(input.trim())) setInput("");
-                  }}
-                >
-                  <input
-                    type="password"
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    placeholder="Steuerschlüssel"
-                    aria-label="Steuerschlüssel"
-                    autoComplete="off"
-                    className="h-9 w-64 min-w-0 rounded-md border border-line bg-black/30 px-3 text-[13px] placeholder:text-faint focus:outline-none"
-                  />
-                  <button disabled={!input.trim() || busy != null} className="h-9 rounded-md border border-[var(--line-strong)] px-3 text-[13px] hover:bg-white/5 disabled:opacity-50">
-                    Entsperren
-                  </button>
-                  <span className="basis-full text-[11px] text-faint">
-                    Nur mit Schlüssel bedienbar, damit niemand sonst den Scanner schaltet. Er steht in <code className="font-mono">worker/.env</code> und wird in diesem Browser gemerkt.
-                  </span>
-                </form>
-              ) : (
+              {!locked && (
                 <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-line pt-4 text-[12px] text-muted">
                   <label className="flex items-center gap-2">
                     Intervall
@@ -214,13 +189,6 @@ export function ScannerPanel() {
                     />
                     Fahrzeugnummern lesen (bahn.expert)
                   </label>
-                  {local ? (
-                    <span className="ml-auto text-faint">Auf diesem Rechner ohne Schlüssel bedienbar</span>
-                  ) : (
-                    <button onClick={lock} className="ml-auto text-faint underline-offset-2 hover:text-fg hover:underline">
-                      Sperren
-                    </button>
-                  )}
                 </div>
               )}
               {msg && <p role="alert" className="mt-3 text-[12px] text-bad">{msg}</p>}

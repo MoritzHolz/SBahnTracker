@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { signOut } from "@/components/LoginGate";
 import type { SourceStatus } from "@/lib/api";
 import type { ScannerStatus } from "@/lib/scanner";
 import { fmtRelative, fmtTimeSec } from "@/lib/time";
@@ -120,6 +121,11 @@ export function AppNav({ active }: { active: "karte" | "fahrzeuge" | "scanner" }
         {item("karte", "/", "Karte")}
         {item("fahrzeuge", "/fahrzeuge", "Fahrzeuge")}
         {item("scanner", "/scanner", "Scanner")}
+        <button onClick={() => void signOut()} title="Abmelden" aria-label="Abmelden" className="rounded px-1.5 py-1 text-[12px] text-muted hover:text-fg">
+          <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M6.5 2.5h-3v11h3M7 8h6.5M11 5.5 13.5 8 11 10.5" />
+          </svg>
+        </button>
       </nav>
     </div>
   );

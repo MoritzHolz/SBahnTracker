@@ -17,9 +17,9 @@ Live-Karte der S-Bahn Stuttgart: Fahrten mit Echtzeit-Zeiten, Gleisen und Haltfo
 ```
 NVBW EFA (efa-bw.de/nvbw)                       Browser (Next.js, MapLibre)
    │  XML_DM_REQUEST (Abfahrten + Haltfolge)        ▲  RPC get_live_trips / get_route_shapes /
-   │  XML_STOPSEQCOORD_REQUEST (Gleisgeometrie)     │      get_source_status / search_vehicle (anon, nur lesen)
+   │  XML_STOPSEQCOORD_REQUEST (Gleisgeometrie)     │      get_source_status / search_vehicle (nur angemeldet)
    ▼                                                │
-Supabase Edge Function `collect` ──RPC (service_role)──► Postgres (RLS: anon = SELECT)
+Supabase Edge Function `collect` ──RPC (service_role)──► Postgres (RLS: nur private.members)
    ▲                                                     ├─ trips, trip_stops, route_shapes, stations, lines
    └── pg_cron alle 3 min → pg_net → POST (Shared Secret)├─ vehicles, formations, vehicle_sightings
                                                          ├─ split_events, parking_estimates (Trigger/Cron)
@@ -102,7 +102,9 @@ Das Collector-Secret liegt in `private.app_config` (nicht über die API lesbar) 
 | `parking_estimates` | vermuteter Abstellort/Status mit Konfidenz und Begründung |
 | `collector_runs` | Protokoll jedes Sammellaufs |
 
-RLS: Alle Tabellen sind für `anon` nur lesbar. Geschrieben wird über `security definer`-Funktionen mit `service_role`, über Trigger, vom Webscanner (eigenes Secret) und über `report_formation` (PIN, nach 10 Fehlversuchen pro Stunde gesperrt).
+**Login:** Lesen dürfen nur angemeldete Konten aus `private.members` (RLS und Prüfung in den RPCs, Migrationen `members` und `members_only`). `anon` sieht nichts. Konten legt man im Supabase-Dashboard an (Authentication → Users) und schaltet sie mit einem Eintrag in `private.members` frei. Registrierung dort abschalten; auch ohne das sieht ein fremdes Konto nichts.
+
+Geschrieben wird über `security definer`-Funktionen mit `service_role`, über Trigger, vom Webscanner (eigenes Secret) und über `report_formation` (PIN, nach 10 Fehlversuchen pro Stunde gesperrt).
 
 ## API (RPC)
 
