@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* Handy hoch und quer: wenig Breite oder wenig Höhe */
+@custom-variant compact {
+  @media (max-width: 767px), (max-height: 560px) {
+    @slot;
+  }
+}
+
 :root {
   --bg: #0b0d10;
   --panel: rgba(14, 17, 21, 0.88);
@@ -34,6 +41,12 @@
   --font-mono: var(--font-geist-mono);
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
 html,
 body {
   height: 100%;
@@ -64,6 +77,46 @@ body {
 :focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 2px;
+}
+
+@media (max-width: 767px), (max-height: 560px) {
+  :root {
+    /* etwas heller, damit kleine Texte auch draußen lesbar sind */
+    --muted: #9aa1ab;
+    --faint: #7d848f;
+  }
+  /* Unter 16 px zoomt iOS beim Antippen eines Feldes in die Seite */
+  input:not([type="checkbox"]),
+  select {
+    font-size: 16px !important;
+  }
+  input[type="checkbox"] {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+}
+
+/* Seitenränder inkl. Notch bzw. abgerundeter Ecken */
+.page-x {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+.page-b {
+  padding-bottom: calc(2rem + env(safe-area-inset-bottom));
+}
+.sheet-b {
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+}
+
+/* Kartenelemente über dem Blatt halten; gezoomt wird mit zwei Fingern */
+@media (max-width: 767px) {
+  .maplibregl-ctrl-bottom-right,
+  .maplibregl-ctrl-bottom-left {
+    bottom: var(--map-bottom, 0px) !important;
+  }
+  .maplibregl-ctrl-group {
+    display: none !important;
+  }
 }
 
 /* MapLibre-Controls an das dunkle Design anpassen */

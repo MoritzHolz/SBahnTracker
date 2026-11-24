@@ -40,7 +40,7 @@ export function LoginGate({ children }: { children: React.ReactNode }) {
 
   if (state === "member") return children;
   return (
-    <main className="grid min-h-dvh place-items-center bg-bg px-5 text-fg">
+    <main className="grid min-h-dvh place-items-center bg-bg px-5 text-fg compact:place-items-start compact:justify-items-center compact:pt-[18dvh]">
       <div className="w-full max-w-xs">
         <h1 className="text-center text-lg font-semibold tracking-tight">S-Bahn Stuttgart Live</h1>
         {state === "checking" && <p className="mt-4 text-center text-[13px] text-faint">Anmeldung wird geprüft …</p>}
@@ -56,7 +56,7 @@ export function LoginGate({ children }: { children: React.ReactNode }) {
   );
 }
 
-const BUTTON = "h-10 w-full rounded-md border border-[var(--line-strong)] bg-white/[0.06] text-[13px] font-medium hover:bg-white/[0.1] disabled:opacity-50";
+const BUTTON = "h-10 compact:h-12 compact:text-[15px] w-full rounded-md border border-[var(--line-strong)] bg-white/[0.06] text-[13px] font-medium hover:bg-white/[0.1] disabled:opacity-50";
 
 function Notice({ text, action, onClick }: { text: string; action: string; onClick: () => void }) {
   return (
@@ -96,11 +96,11 @@ function LoginForm() {
     [email, password],
   );
 
-  const input = "h-10 w-full rounded-md border border-line bg-black/30 px-3 text-[14px] placeholder:text-faint focus:border-[var(--line-strong)] focus:outline-none";
+  const input = "h-10 compact:h-12 w-full rounded-md border border-line bg-black/30 px-3 text-[14px] placeholder:text-faint focus:border-[var(--line-strong)] focus:outline-none";
   return (
     <form onSubmit={submit} className="mt-5 space-y-2.5">
-      <input className={input} type="email" required autoComplete="username" placeholder="E-Mail" aria-label="E-Mail" value={email} onChange={(e) => setEmail(e.target.value)} />
-      <input className={input} type="password" required autoComplete="current-password" placeholder="Passwort" aria-label="Passwort" value={password} onChange={(e) => setPassword(e.target.value)} />
+      <input className={input} type="email" inputMode="email" autoCapitalize="none" autoCorrect="off" enterKeyHint="next" required autoComplete="username" placeholder="E-Mail" aria-label="E-Mail" value={email} onChange={(e) => setEmail(e.target.value)} />
+      <input className={input} type="password" enterKeyHint="go" required autoComplete="current-password" placeholder="Passwort" aria-label="Passwort" value={password} onChange={(e) => setPassword(e.target.value)} />
       <button className={BUTTON} disabled={busy || !email.trim() || !password}>
         {busy ? "Wird angemeldet …" : "Anmelden"}
       </button>

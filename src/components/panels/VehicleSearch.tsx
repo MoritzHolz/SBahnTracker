@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DataBadge, LineBadge } from "@/components/ui/Badges";
 import { useNow } from "@/hooks/useLiveData";
 import { useScannerStatus } from "@/hooks/useScanner";
@@ -80,8 +80,15 @@ export function VehicleSearch() {
     };
   }, [initial, reload]);
 
+  // Nur mit Maus/Tastatur vorab ins Feld springen; auf dem Handy ginge sonst sofort die Tastatur auf
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) inputRef.current?.focus();
+  }, []);
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) inputRef.current?.blur();
     const q = input.trim();
     router.replace(q ? `/fahrzeuge?q=${encodeURIComponent(q)}` : "/fahrzeuge");
   };
@@ -89,19 +96,19 @@ export function VehicleSearch() {
   return (
     <main className="min-h-dvh bg-bg text-fg">
       <header className="sticky top-0 z-10 border-b border-line bg-[var(--panel)] backdrop-blur-md">
-        <div className="mx-auto max-w-3xl px-5 py-3">
+        <div className="page-x mx-auto max-w-3xl py-3 compact:py-1.5 compact:pt-[calc(0.375rem+env(safe-area-inset-top))]">
           <AppNav active="fahrzeuge" />
         </div>
       </header>
 
-      <div className="mx-auto max-w-3xl px-5 py-8">
+      <div className="page-x page-b mx-auto max-w-3xl pt-8 compact:pt-5">
         <h1 className="text-xl font-semibold tracking-tight">Fahrzeugsuche</h1>
         <p className="mt-1 max-w-xl text-[13px] leading-relaxed text-muted">
           Suche nach einer Fahrzeugnummer (z. B. „423 310“, auch Wagennummern wie „423 810“) oder einer Zugnummer (z. B. „7172“). Gezeigt werden Sichtungen in Wagenreihungen, ein
           vermuteter Abstellort und mögliche Zugtrennungen.
         </p>
 
-        <div className="mt-4 rounded-md border border-line px-3 py-2.5 text-[12px] leading-relaxed text-muted">
+        <div className="mt-4 rounded-md border border-line px-3 py-2.5 text-[12px] leading-relaxed text-muted max-md:hidden">
           <div className="mb-1 flex items-center gap-2">
             <DataBadge state="zuletzt" label="Webscanner und eigene Meldungen" />
           </div>
@@ -109,22 +116,26 @@ export function VehicleSearch() {
           auf der Karte („Fahrzeug melden“). Abstellorte und Zugtrennungen sind daraus abgeleitete Vermutungen.
         </div>
 
-        <form onSubmit={submit} className="mt-6 flex gap-2">
+        <form onSubmit={submit} className="mt-6 flex gap-2 max-md:mt-4">
           <input
+            ref={inputRef}
+            enterKeyHint="search"
+            autoCorrect="off"
+            autoCapitalize="none"
+            aria-label="Fahrzeug- oder Zugnummer"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Fahrzeug- oder Zugnummer, z. B. 423 310 oder 7172"
-            className="tnum h-10 min-w-0 flex-1 rounded-md border border-line bg-black/30 px-3 text-[14px] placeholder:text-faint focus:border-[var(--line-strong)] focus:outline-none"
-            autoFocus
+            placeholder="z. B. 423 310 oder 7172"
+            className="tnum h-10 compact:h-12 min-w-0 flex-1 rounded-md border border-line bg-black/30 px-3 text-[14px] placeholder:text-faint focus:border-[var(--line-strong)] focus:outline-none"
           />
           <button
             type="submit"
-            className="h-10 rounded-md border border-[var(--line-strong)] bg-white/[0.06] px-4 text-[13px] font-medium hover:bg-white/[0.1]"
+            className="h-10 compact:h-12 compact:text-[15px] rounded-md border border-[var(--line-strong)] bg-white/[0.06] px-4 text-[13px] font-medium hover:bg-white/[0.1]"
           >
             Suchen
           </button>
         </form>
-        <div className="mt-3 max-w-xs">
+        <div className="mt-3 sm:max-w-xs">
           <ScanNowButton status={scanner} apply={apply} now={now} onFinished={onScanned} />
         </div>
 
@@ -177,7 +188,7 @@ function TrainRuns({ train, runs, now, lineStyle }: { train: string; runs: Train
                     </span>
                     {active && <span className="text-[12px] text-ok">unterwegs</span>}
                   </div>
-                  <div className="mt-0.5 flex flex-wrap gap-x-2 text-[12px] text-faint">
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-faint">
                     {f ? (
                       <>
                         <span>
@@ -185,7 +196,7 @@ function TrainRuns({ train, runs, now, lineStyle }: { train: string; runs: Train
                           {f.vehicles.map((v, i) => (
                             <span key={v}>
                               {i > 0 && ", "}
-                              <Link href={`/fahrzeuge?q=${encodeURIComponent(v)}`} className="tnum text-fg hover:underline">
+                              <Link href={`/fahrzeuge?q=${encodeURIComponent(v)}`} className="tnum text-fg hover:underline compact:inline-block compact:py-2">
                                 {v}
                               </Link>
                             </span>
@@ -220,7 +231,7 @@ function VehicleProfile({ r, now, lineStyle }: { r: VehicleSearchResult; now: nu
         <span className="text-[12px] text-muted">{v.vehicle_type_id ? `Baureihe ${v.vehicle_type_id}` : "Baureihe unbekannt"}</span>
       </div>
       {v.last_line_id && (
-        <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[13px] text-muted">
+        <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[13px] text-muted">
           <span>zuletzt als</span>
           <LineBadge id={v.last_line_id} {...lineStyle(v.last_line_id)} size="sm" />
           <span className="text-fg">
@@ -228,7 +239,7 @@ function VehicleProfile({ r, now, lineStyle }: { r: VehicleSearchResult; now: nu
           </span>
           {v.last_seen && (
             <span>
-              , {fmtTime(v.last_seen)}
+              {fmtTime(v.last_seen)}
               {v.last_station_name ? ` an ${v.last_station_name}` : ""}
             </span>
           )}
@@ -299,7 +310,7 @@ function VehicleProfile({ r, now, lineStyle }: { r: VehicleSearchResult; now: nu
                         </span>
                       )}
                     </div>
-                    <div className="mt-0.5 flex flex-wrap gap-x-2 text-[12px] text-faint">
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-faint">
                       <span>gesehen an {s.station_name ?? "unbekannt"}</span>
                       {others.length > 0 && (
                         <span>
@@ -307,7 +318,7 @@ function VehicleProfile({ r, now, lineStyle }: { r: VehicleSearchResult; now: nu
                           {others.map((o, j) => (
                             <span key={o}>
                               {j > 0 && ", "}
-                              <Link href={`/fahrzeuge?q=${encodeURIComponent(o)}`} className="tnum text-muted hover:text-fg">
+                              <Link href={`/fahrzeuge?q=${encodeURIComponent(o)}`} className="tnum text-muted hover:text-fg compact:inline-block compact:py-2">
                                 {o}
                               </Link>
                             </span>

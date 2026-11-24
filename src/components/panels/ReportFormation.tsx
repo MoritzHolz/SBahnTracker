@@ -108,7 +108,7 @@ export function ReportFormation({ trip, defaultStopIdx, onDone, onCancel }: Prop
                 const n = unitNumber(e.target.value);
                 if (n) setUnits((prev) => prev.map((x, j) => (j === i ? n : x)));
               }}
-              className={`tnum h-8 min-w-0 flex-1 rounded-md border bg-black/30 px-2 text-[13px] placeholder:text-faint focus:outline-none ${
+              className={`tnum h-8 compact:h-11 min-w-0 flex-1 rounded-md border bg-black/30 px-2 text-[13px] placeholder:text-faint focus:outline-none ${
                 invalid[i] ? "border-bad/60" : "border-line focus:border-[var(--line-strong)]"
               }`}
             />
@@ -116,7 +116,7 @@ export function ReportFormation({ trip, defaultStopIdx, onDone, onCancel }: Prop
               <button
                 type="button"
                 onClick={() => setUnits((prev) => prev.filter((_, j) => j !== i))}
-                className="grid h-8 w-7 place-items-center rounded-md text-faint hover:bg-white/5 hover:text-fg"
+                className="grid h-8 w-7 compact:h-11 compact:w-11 place-items-center rounded-md text-faint hover:bg-white/5 hover:text-fg"
                 aria-label={`Einheit ${i + 1} entfernen`}
               >
                 ✕
@@ -132,7 +132,7 @@ export function ReportFormation({ trip, defaultStopIdx, onDone, onCancel }: Prop
         <button
           type="button"
           onClick={() => setUnits((prev) => [...prev, ""])}
-          className="mt-1.5 text-[11.5px] text-muted hover:text-fg"
+          className="mt-1.5 text-[11.5px] text-muted compact:min-h-11 compact:text-[13px] hover:text-fg"
         >
           + weitere Einheit
         </button>
@@ -146,7 +146,7 @@ export function ReportFormation({ trip, defaultStopIdx, onDone, onCancel }: Prop
         <select
           value={stationId}
           onChange={(e) => setStationId(e.target.value)}
-          className="h-8 min-w-0 rounded-md border border-line bg-black/30 px-2 text-[12px] focus:outline-none"
+          className="h-8 compact:h-11 min-w-0 rounded-md border border-line bg-black/30 px-2 text-[12px] focus:outline-none"
         >
           <option value="" className="bg-[var(--panel-solid)]">
             keine Angabe
@@ -171,10 +171,10 @@ export function ReportFormation({ trip, defaultStopIdx, onDone, onCancel }: Prop
               autoComplete="off"
               value={pin}
               onChange={(e) => setPin(e.target.value)}
-              className="h-8 min-w-0 rounded-md border border-line bg-black/30 px-2 text-[13px] focus:border-[var(--line-strong)] focus:outline-none"
+              className="h-8 compact:h-11 min-w-0 rounded-md border border-line bg-black/30 px-2 text-[13px] focus:border-[var(--line-strong)] focus:outline-none"
             />
             <span />
-            <label className="flex items-center gap-1.5 text-[11px] text-muted">
+            <label className="flex items-center gap-1.5 text-[11px] text-muted compact:min-h-11 compact:gap-2.5 compact:text-[13px]">
               <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
               PIN auf diesem Gerät merken
             </label>
@@ -190,7 +190,7 @@ export function ReportFormation({ trip, defaultStopIdx, onDone, onCancel }: Prop
                 setPin("");
                 setEditPin(true);
               }}
-              className="text-muted underline decoration-[var(--line-strong)] underline-offset-2 hover:text-fg"
+              className="compact:min-h-11 compact:text-[13px] text-muted underline decoration-[var(--line-strong)] underline-offset-2 hover:text-fg"
             >
               PIN vergessen / ändern
             </button>
@@ -206,13 +206,13 @@ export function ReportFormation({ trip, defaultStopIdx, onDone, onCancel }: Prop
       {touched && filled.length === 0 && <p className="mt-2 text-[11px] text-bad">Mindestens eine Fahrzeugnummer angeben.</p>}
 
       <div className="mt-3 flex items-center justify-end gap-2">
-        <button type="button" onClick={onCancel} className="h-8 rounded-md px-3 text-[12px] text-muted hover:text-fg">
+        <button type="button" onClick={onCancel} className="h-8 compact:h-11 compact:text-[14px] rounded-md px-3 text-[12px] text-muted hover:text-fg">
           Abbrechen
         </button>
         <button
           type="submit"
           disabled={!canSubmit}
-          className="h-8 rounded-md border border-[var(--line-strong)] bg-white/[0.08] px-3 text-[12px] font-medium hover:bg-white/[0.12] disabled:cursor-not-allowed disabled:opacity-40"
+          className="h-8 compact:h-11 compact:text-[14px] rounded-md border border-[var(--line-strong)] bg-white/[0.08] px-3 text-[12px] font-medium hover:bg-white/[0.12] disabled:cursor-not-allowed disabled:opacity-40"
         >
           {busy ? "Wird gesendet …" : "Meldung senden"}
         </button>

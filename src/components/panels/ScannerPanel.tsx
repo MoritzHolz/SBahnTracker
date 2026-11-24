@@ -82,12 +82,12 @@ export function ScannerPanel() {
   return (
     <main className="min-h-dvh bg-bg text-fg">
       <header className="sticky top-0 z-10 border-b border-line bg-[var(--panel)] backdrop-blur-md">
-        <div className="mx-auto max-w-4xl px-5 py-3">
+        <div className="page-x mx-auto max-w-4xl py-3 compact:py-1.5 compact:pt-[calc(0.375rem+env(safe-area-inset-top))]">
           <AppNav active="scanner" />
         </div>
       </header>
 
-      <div className="mx-auto max-w-4xl px-5 py-8">
+      <div className="page-x page-b mx-auto max-w-4xl pt-8 compact:pt-5">
         <h1 className="text-xl font-semibold tracking-tight">Live-Webscanner</h1>
         <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-muted">
           Öffnet die hinterlegten Webseiten in einem echten Browser, liest die sichtbaren S-Bahn-Fahrten ab und ergänzt damit die Karte.
@@ -100,7 +100,7 @@ export function ScannerPanel() {
         {s && (
           <>
             {/* Schalter */}
-            <section className="mt-6 rounded-lg border border-line bg-raised p-5">
+            <section className="mt-6 rounded-lg border border-line bg-raised p-5 max-sm:p-4">
               <div className="flex flex-wrap items-center gap-x-5 gap-y-4">
                 <button
                   role="switch"
@@ -126,12 +126,12 @@ export function ScannerPanel() {
                     {s.enabled_changed_at ? `Geschaltet ${fmtRelative(s.enabled_changed_at, now)}` : "Noch nie eingeschaltet"}
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 max-sm:w-full">
                   {scanRunning && !s.enabled && (
                     <button
                       onClick={() => send("disable")}
                       disabled={locked || busy != null}
-                      className="h-10 rounded-md border border-bad/40 px-4 text-[13px] font-medium text-bad hover:bg-bad/10 disabled:opacity-50"
+                      className="h-10 compact:h-12 max-sm:flex-1 rounded-md border border-bad/40 px-4 text-[13px] font-medium text-bad hover:bg-bad/10 disabled:opacity-50"
                     >
                       Scan abbrechen
                     </button>
@@ -140,7 +140,7 @@ export function ScannerPanel() {
                     onClick={() => send("scan_now")}
                     disabled={locked || busy != null || scanRunning || s.manual_pending || (!s.worker_online && !local)}
                     title={!s.worker_online && !local ? "Worker offline" : undefined}
-                    className="h-10 rounded-md border border-[var(--line-strong)] bg-white/[0.06] px-4 text-[13px] font-medium hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="h-10 compact:h-12 max-sm:flex-1 rounded-md border border-[var(--line-strong)] bg-white/[0.06] px-4 text-[13px] font-medium hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {scanRunning ? "Scan läuft …" : s.manual_pending ? "Angefordert …" : "Jetzt scannen"}
                   </button>
@@ -164,14 +164,14 @@ export function ScannerPanel() {
               )}
 
               {!locked && (
-                <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-line pt-4 text-[12px] text-muted">
-                  <label className="flex items-center gap-2">
+                <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-line pt-4 text-[12px] text-muted compact:text-[14px]">
+                  <label className="flex items-center gap-2 compact:min-h-11">
                     Intervall
                     <select
                       value={s.interval_min}
                       disabled={busy != null}
                       onChange={(e) => send("set_interval", Number(e.target.value))}
-                      className="h-8 rounded-md border border-line bg-black/30 px-2 text-fg"
+                      className="h-8 compact:h-11 rounded-md border border-line bg-black/30 px-2 text-fg"
                     >
                       {[...new Set([5, 6, 7, 8, 9, 10, 15, 20, 30, 60, s.interval_min])].sort((a, b) => a - b).map((m) => (
                         <option key={m} value={m} className="bg-[var(--panel-solid)]">
@@ -180,7 +180,7 @@ export function ScannerPanel() {
                       ))}
                     </select>
                   </label>
-                  <label className="flex items-center gap-2">
+                  <label className="flex items-center gap-2 compact:min-h-11">
                     <input
                       type="checkbox"
                       checked={s.formations_enabled}
@@ -260,7 +260,7 @@ export function ScannerPanel() {
               <ul className="mt-2 divide-y divide-line text-[13px]">
                 {s.pages.map((p) => (
                   <li key={p.url} className="flex flex-wrap items-baseline justify-between gap-x-4 py-2">
-                    <a href={p.url} target="_blank" rel="noreferrer" className="hover:underline">
+                    <a href={p.url} target="_blank" rel="noreferrer" className="hover:underline compact:py-1.5">
                       {p.label}
                     </a>
                     <span className="text-[12px] text-faint">
@@ -281,7 +281,24 @@ export function ScannerPanel() {
               {s.recent_runs.length === 0 ? (
                 <p className="mt-2 text-[13px] text-faint">Noch keine Scans.</p>
               ) : (
-                <div className="mt-2 overflow-x-auto">
+                <>
+                <ul className="mt-2 divide-y divide-line border-y border-line md:hidden">
+                  {s.recent_runs.map((r) => (
+                    <li key={r.id} className="tnum py-2.5 text-[13px]">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span>
+                          {fmtTimeSec(r.started_at)} <span className="text-muted">· {r.trigger === "manual" ? "manuell" : "automatisch"}</span>
+                        </span>
+                        <span className={RUN_LABEL[r.status][1]}>{RUN_LABEL[r.status][0]}</span>
+                      </div>
+                      <div className="mt-0.5 text-[12px] text-muted">
+                        {r.trains_captured} erfasst · {r.trains_new} neu · {r.trains_updated} aktualisiert · {r.formations_found} Wagenreihungen
+                      </div>
+                      {r.error && <p className="mt-0.5 break-words text-[12px] text-faint">{r.error}</p>}
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-2 overflow-x-auto max-md:hidden">
                   <table className="tnum w-full min-w-[560px] text-left text-[12px]">
                     <thead className="text-faint">
                       <tr>
@@ -308,6 +325,7 @@ export function ScannerPanel() {
                     </tbody>
                   </table>
                 </div>
+                </>
               )}
             </section>
 
@@ -317,7 +335,46 @@ export function ScannerPanel() {
               {rows.length === 0 ? (
                 <p className="mt-2 text-[13px] text-faint">In den letzten drei Stunden wurde nichts erfasst.</p>
               ) : (
-                <div className="scroll-thin mt-2 max-h-[32rem] overflow-auto rounded-lg border border-line">
+                <>
+                <ul className="mt-2 divide-y divide-line border-y border-line md:hidden">
+                  {rows.map(({ t, seen }) => (
+                    <li key={t.id} className={`tnum py-2.5 text-[13px] ${seen === "zuletzt" ? "opacity-70" : ""}`}>
+                      <div className="flex items-center gap-2.5">
+                        {t.line_id ? (
+                          <LineBadge id={t.line_id} color={lineColor(lines, t.line_id)} textColor={lineTextColor(lines, t.line_id)} />
+                        ) : (
+                          <Na />
+                        )}
+                        <span className="min-w-0 flex-1 truncate text-[14px]">→ {t.destination_name ?? "?"}</span>
+                        <span>{fmtTime(t.dep_planned ?? t.arr_planned)}</span>
+                        <span className="min-w-6 text-right">{t.delay_min == null ? <Na /> : <Delay minutes={t.delay_min} compact />}</span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-muted">
+                        <span>Zug {t.train_number}</span>
+                        <span>{t.platform ? `Gl. ${t.platform}` : "Gleis n. v."}</span>
+                        {t.cancelled && <span className="text-bad">Ausfall</span>}
+                        <span className="ml-auto">
+                          {seen === "erfasst" ? <DataBadge state="live" label="Erfasst" /> : <DataBadge state="zuletzt" label={`Zuletzt ${fmtTime(t.last_seen_at)}`} />}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-[12px]">
+                        {t.vehicles ? (
+                          <span className="flex flex-wrap gap-1.5">
+                            {t.vehicles.map((v) => (
+                              <a key={v} href={`/fahrzeuge?q=${encodeURIComponent(v)}`} className="flex h-9 items-center rounded-md border border-line px-2.5 text-[13px]">
+                                {v}
+                              </a>
+                            ))}
+                          </span>
+                        ) : (
+                          <span className="text-faint">Fahrzeuge {vehicleText(t, now)}</span>
+                        )}
+                      </div>
+                      {t.position_kind === "none" && !t.cancelled && <p className="mt-0.5 text-[11.5px] text-faint">Nicht auf der Karte: Position nicht berechenbar</p>}
+                    </li>
+                  ))}
+                </ul>
+                <div className="scroll-thin mt-2 max-h-[32rem] overflow-auto rounded-lg border border-line max-md:hidden">
                   <table className="tnum w-full min-w-[760px] text-left text-[12px]">
                     <thead className="sticky top-0 bg-[var(--panel-solid)] text-faint">
                       <tr>
@@ -353,7 +410,7 @@ export function ScannerPanel() {
                                 </a>
                               ))
                             ) : (
-                              <span className="text-faint">{t.vehicle_state === "not_available" ? "nicht verfügbar" : Date.parse(t.dep_planned ?? t.arr_planned ?? "") < now - 30 * 60_000 ? "nicht erfasst" : "noch nicht gelesen"}</span>
+                              <span className="text-faint">{vehicleText(t, now)}</span>
                             )}
                           </td>
                           <td className="px-2.5 py-1.5 text-muted" title={t.missing.length ? `Nicht verfügbar: ${t.missing.map((m) => MISSING_LABEL[m] ?? m).join(", ")}` : undefined}>
@@ -367,6 +424,7 @@ export function ScannerPanel() {
                     </tbody>
                   </table>
                 </div>
+                </>
               )}
             </section>
           </>
@@ -374,6 +432,11 @@ export function ScannerPanel() {
       </div>
     </main>
   );
+}
+
+function vehicleText(t: WebTrain, now: number): string {
+  if (t.vehicle_state === "not_available") return "nicht verfügbar";
+  return Date.parse(t.dep_planned ?? t.arr_planned ?? "") < now - 30 * 60_000 ? "nicht erfasst" : "noch nicht gelesen";
 }
 
 const Na = () => <span className="text-faint" title="Auf der Webseite nicht angegeben">n. v.</span>;

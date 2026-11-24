@@ -35,7 +35,7 @@ export function ScanNowButton({ status: s, apply, now, onFinished }: Props) {
 
   if (!s || mode === "checking") return null;
   const cls =
-    "flex h-9 w-full items-center justify-center gap-2 rounded-md border border-[var(--line-strong)] bg-white/[0.06] px-3 text-[13px] font-medium hover:bg-white/[0.1] disabled:cursor-default disabled:opacity-60";
+    "flex h-9 compact:h-11 w-full items-center justify-center gap-2 rounded-md border border-[var(--line-strong)] bg-white/[0.06] px-3 text-[13px] font-medium hover:bg-white/[0.1] disabled:cursor-default disabled:opacity-60";
   const remoteOffline = mode === "member" && !s.worker_online;
   const stuck = requestedAt !== null && !recent && !running && s.manual_pending && !s.worker_online;
   const run = s.last_run;

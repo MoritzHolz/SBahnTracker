@@ -73,7 +73,7 @@ export function SourceStatusBadge({
     >
       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone}`} />
       <span className="hidden sm:inline">{source}</span>
-      <span className="text-faint">·</span>
+      <span className="hidden text-faint sm:inline">·</span>
       <span className="tnum">{status?.last_ok ? `Abruf ${fmtRelative(status.last_ok, now)}` : status ? "kein erfolgreicher Abruf" : "Status lädt …"}</span>
       <span className="text-faint">·</span>
       <span className="tnum">{tripCount} Züge</span>
@@ -89,7 +89,7 @@ export function Banner({ tone, children }: { tone: "warn" | "bad"; children: Rea
         tone === "bad" ? "border-bad/40 bg-bad/10 text-[#ffb4b4]" : "border-warn/40 bg-warn/10 text-[#ffe2a3]"
       }`}
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${tone === "bad" ? "bg-bad" : "bg-warn"}`} />
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone === "bad" ? "bg-bad" : "bg-warn"}`} />
       {children}
     </div>
   );
@@ -99,7 +99,8 @@ export function AppNav({ active }: { active: "karte" | "fahrzeuge" | "scanner" }
   const item = (key: "karte" | "fahrzeuge" | "scanner", href: string, label: string) => (
     <Link
       href={href}
-      className={`rounded px-1.5 py-1 text-[12px] transition-colors ${
+      aria-current={active === key ? "page" : undefined}
+      className={`rounded px-1.5 py-1 text-[12px] transition-colors compact:flex compact:h-11 compact:items-center compact:rounded-md compact:px-2.5 compact:text-[14px] ${
         active === key ? "bg-white/[0.07] text-fg" : "text-muted hover:text-fg"
       }`}
     >
@@ -108,21 +109,21 @@ export function AppNav({ active }: { active: "karte" | "fahrzeuge" | "scanner" }
   );
   return (
     <div className="flex items-center justify-between gap-3">
-      <Link href="/" className="flex items-center gap-2">
+      <Link href="/" className="flex items-center gap-2 max-sm:hidden">
         <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
           <circle cx="10" cy="10" r="8.5" fill="none" stroke="var(--ok)" strokeWidth="1.5" />
           <path d="M7 6.5h4.2a2.3 2.3 0 0 1 0 4.6H8.8a2.3 2.3 0 0 0 0 4.6H13" fill="none" stroke="var(--fg)" strokeWidth="1.6" strokeLinecap="round" />
         </svg>
-        <span className="whitespace-nowrap text-[13px] font-semibold tracking-tight">
+        <span className={`whitespace-nowrap text-[13px] font-semibold tracking-tight ${active === "karte" ? "md:compact:hidden" : ""}`}>
           S-Bahn Stuttgart{active !== "karte" && <span className="font-normal text-muted"> Live</span>}
         </span>
       </Link>
-      <nav className="flex items-center gap-0.5">
+      <nav className="flex items-center gap-0.5 max-sm:flex-1">
         {item("karte", "/", "Karte")}
         {item("fahrzeuge", "/fahrzeuge", "Fahrzeuge")}
         {item("scanner", "/scanner", "Scanner")}
-        <button onClick={() => void signOut()} title="Abmelden" aria-label="Abmelden" className="rounded px-1.5 py-1 text-[12px] text-muted hover:text-fg">
-          <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <button onClick={() => void signOut()} title="Abmelden" aria-label="Abmelden" className="rounded px-1.5 py-1 text-[12px] text-muted hover:text-fg compact:grid compact:h-11 compact:w-11 compact:place-items-center max-sm:ml-auto">
+          <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 compact:h-4.5 compact:w-4.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M6.5 2.5h-3v11h3M7 8h6.5M11 5.5 13.5 8 11 10.5" />
           </svg>
         </button>

@@ -31,6 +31,9 @@ interface Props {
   onClose: () => void;
   /** nach erfolgreicher Meldung (Daten neu laden) */
   onReported: () => void;
+  /** Handy: macht den Kopf zum Ziehgriff des Blatts */
+  handleProps?: React.HTMLAttributes<HTMLDivElement>;
+  onHandleTap?: () => void;
 }
 
 function statusSentence(s: TripSummary): string {
@@ -54,7 +57,7 @@ function statusSentence(s: TripSummary): string {
   }
 }
 
-export function TrainDetail({ summary: s, track, lineStyle, scanner, now, follow, onFollow, onClose, onReported }: Props) {
+export function TrainDetail({ summary: s, track, lineStyle, scanner, now, follow, onFollow, onClose, onReported, handleProps, onHandleTap }: Props) {
   const [reporting, setReporting] = useState(false);
   const [justReported, setJustReported] = useState<string[] | null>(null);
   const t = s.trip;
@@ -70,10 +73,73 @@ export function TrainDetail({ summary: s, track, lineStyle, scanner, now, follow
   const expertStop =
     s.status === "am_halt" || s.status === "vor_abfahrt" ? s.lastStop : s.nextStop ?? s.lastStop ?? t.stops[0] ?? null;
 
+  const badges = (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <DataBadge state="geschaetzt" label="Position geschätzt" title={`Positionsqualität: ${QUALITY_LABEL[quality]}`} />
+      <DataBadge
+        state={rt}
+        label={rt === "na" ? "Echtzeit nicht verfügbar" : undefined}
+        title={rt === "na" ? "Für diese Fahrt liegen nur Fahrplandaten vor." : undefined}
+      />
+      {track?.approximate && (
+        <span
+          className="rounded-full border border-warn/30 px-1.5 py-px text-[10px] font-medium uppercase tracking-[0.06em] text-warn"
+          title="Für diese Fahrt ist noch kein Streckenverlauf geladen; die Position wird auf einer Geraden zwischen den Halten geschätzt."
+        >
+          Streckenverlauf ungenau
+        </span>
+      )}
+    </div>
+  );
+  const closeButton = (
+    <button
+      onClick={onClose}
+      className="-mr-1.5 grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted hover:bg-white/5 hover:text-fg compact:h-11 compact:w-11"
+      aria-label="Details schließen"
+    >
+      ✕
+    </button>
+  );
+
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Kopf */}
-      <div className="border-b border-line px-5 pb-4 pt-4">
+      {/* Kopf (Handy): kompakt, zugleich Griff zum Ziehen */}
+      <div {...handleProps} className="hidden shrink-0 touch-none select-none border-b border-line pb-2.5 pl-4 pr-3 compact:block">
+        <button
+          type="button"
+          className="flex h-5 w-full items-center justify-center md:hidden"
+          onClick={onHandleTap}
+          aria-label="Größe der Details ändern"
+        >
+          <span className="h-1 w-9 rounded-full bg-white/25" />
+        </button>
+        <div className="flex items-center gap-3 md:pt-2">
+          <LineBadge id={t.line_id} color={lineStyle.color} textColor={lineStyle.textColor} size="lg" />
+          <div className="min-w-0 flex-1">
+            <div className={`truncate text-[16px] font-semibold leading-snug ${t.cancelled ? "line-through" : ""}`}>{t.destination_name ?? "–"}</div>
+            <div className="line-clamp-2 text-[12.5px] leading-snug text-muted">
+              <span className="tnum">Zug {t.train_number ?? "unbekannt"}</span> · {statusSentence(s)}
+            </div>
+          </div>
+          {s.position && (
+            <button
+              type="button"
+              aria-pressed={follow}
+              aria-label="Zug auf der Karte folgen"
+              onClick={() => onFollow(!follow)}
+              className={`h-11 shrink-0 rounded-md border px-3 text-[13px] font-medium ${
+                follow ? "border-accent/50 bg-accent/15 text-accent" : "border-[var(--line-strong)] text-fg"
+              }`}
+            >
+              Folgen
+            </button>
+          )}
+          {closeButton}
+        </div>
+      </div>
+
+      {/* Kopf (Desktop) */}
+      <div className="border-b border-line px-5 pb-4 pt-4 compact:hidden">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <LineBadge id={t.line_id} color={lineStyle.color} textColor={lineStyle.textColor} size="lg" />
@@ -82,13 +148,7 @@ export function TrainDetail({ summary: s, track, lineStyle, scanner, now, follow
               <div className="tnum text-[15px] font-semibold leading-tight">{t.train_number ?? "unbekannt"}</div>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="-mr-1.5 grid h-7 w-7 place-items-center rounded-md text-muted hover:bg-white/5 hover:text-fg"
-            aria-label="Details schließen"
-          >
-            ✕
-          </button>
+          {closeButton}
         </div>
         <div className="mt-3 text-[15px] leading-snug">
           <span className="text-muted">{t.origin_name ?? "–"}</span>
@@ -96,22 +156,7 @@ export function TrainDetail({ summary: s, track, lineStyle, scanner, now, follow
           <span className={`font-medium ${t.cancelled ? "line-through" : ""}`}>{t.destination_name ?? "–"}</span>
         </div>
         <div className="mt-1 text-[13px] text-muted">{statusSentence(s)}</div>
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <DataBadge state="geschaetzt" label="Position geschätzt" title={`Positionsqualität: ${QUALITY_LABEL[quality]}`} />
-          <DataBadge
-            state={rt}
-            label={rt === "na" ? "Echtzeit nicht verfügbar" : undefined}
-            title={rt === "na" ? "Für diese Fahrt liegen nur Fahrplandaten vor." : undefined}
-          />
-          {track?.approximate && (
-            <span
-              className="rounded-full border border-warn/30 px-1.5 py-px text-[10px] font-medium uppercase tracking-[0.06em] text-warn"
-              title="Für diese Fahrt ist noch kein Streckenverlauf geladen; die Position wird auf einer Geraden zwischen den Halten geschätzt."
-            >
-              Streckenverlauf ungenau
-            </span>
-          )}
-        </div>
+        <div className="mt-3">{badges}</div>
         {s.position && (
           <label className="mt-3 inline-flex cursor-pointer select-none items-center gap-2 text-[12px] text-muted">
             <input
@@ -126,7 +171,13 @@ export function TrainDetail({ summary: s, track, lineStyle, scanner, now, follow
         )}
       </div>
 
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
+      <div className="scroll-thin sheet-b min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div className="hidden border-b border-line px-5 py-3 compact:block">
+          <div className="mb-2 text-[13px] leading-snug text-muted">
+            {t.origin_name ?? "–"} <span className="text-faint">→</span> {t.destination_name ?? "–"}
+          </div>
+          {badges}
+        </div>
         {/* Kennzahlen */}
         <dl className="border-b border-line px-5 py-3">
           <Kv k="Status">{STATUS_LABEL[s.status]}</Kv>
@@ -248,7 +299,7 @@ export function TrainDetail({ summary: s, track, lineStyle, scanner, now, follow
                     {i > 0 && <span className="text-faint">·</span>}
                     <Link
                       href={`/fahrzeuge?q=${encodeURIComponent(v)}`}
-                      className="tnum rounded border border-line px-1.5 py-0.5 text-[12.5px] hover:border-[var(--line-strong)]"
+                      className="tnum rounded border border-line px-1.5 py-0.5 text-[12.5px] hover:border-[var(--line-strong)] compact:flex compact:h-10 compact:items-center compact:px-3 compact:text-[14px]"
                       title={`Fahrtenbuch von ${v}`}
                     >
                       {v}
@@ -291,7 +342,7 @@ export function TrainDetail({ summary: s, track, lineStyle, scanner, now, follow
                 setJustReported(null);
                 setReporting(true);
               }}
-              className="mt-2.5 h-7 rounded-md border border-[var(--line-strong)] px-2.5 text-[12px] text-fg hover:bg-white/5"
+              className="mt-2.5 h-7 rounded-md border border-[var(--line-strong)] px-2.5 text-[12px] text-fg hover:bg-white/5 compact:h-11 compact:w-full compact:text-[14px]"
             >
               {vehicles.length > 0 ? "Fahrzeuge korrigieren" : "Fahrzeug melden"}
             </button>
@@ -303,7 +354,7 @@ export function TrainDetail({ summary: s, track, lineStyle, scanner, now, follow
                 href={bahnExpertUrl(expertStop.station_name)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-accent hover:underline"
+                className="text-accent hover:underline compact:flex compact:min-h-11 compact:items-center compact:text-[13px]"
               >
                 Auf bahn.expert nachsehen ↗
               </a>

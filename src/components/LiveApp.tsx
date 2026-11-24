@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { sheetHeightCss, TOP_BAR_PX, useBottomSheet } from "@/hooks/useBottomSheet";
 import { useLiveData, useNow } from "@/hooks/useLiveData";
 import { useScannerStatus } from "@/hooks/useScanner";
 import { FALLBACK_LINE_COLOR, lineColor, lineTextColor } from "@/lib/api";
@@ -17,6 +18,10 @@ const LiveMap = dynamic(() => import("./map/LiveMap"), {
   ssr: false,
   loading: () => <div className="absolute inset-0 bg-bg" />,
 });
+
+/** Höhe der zusammengeschobenen Blätter (Handy) */
+const LIST_PEEK_PX = 126;
+const DETAIL_PEEK_PX = 92;
 
 const STATUS_RANK: Record<TripStatus, number> = {
   fahrend: 0,
@@ -57,7 +62,8 @@ export default function LiveApp() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [follow, setFollow] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const list = useBottomSheet("peek", LIST_PEEK_PX);
+  const detail = useBottomSheet("half", DETAIL_PEEK_PX);
 
   // Nicht mehr gelieferte Trips aus dem Geometrie-Cache entfernen
   useEffect(() => {
@@ -158,7 +164,6 @@ export default function LiveApp() {
   const select = useCallback((id: string | null) => {
     setSelectedId(id);
     if (!id) setFollow(false);
-    setSheetOpen(false);
   }, []);
 
   const toggleLine = useCallback((id: string) => {
@@ -174,12 +179,15 @@ export default function LiveApp() {
   const stale = isStale(data.status, now);
 
   // Von Panels verdeckte Kartenränder
+  const hasSelection = selected != null;
   const [isMobile, setIsMobile] = useState(false);
+  const [isWide, setIsWide] = useState(true);
   const [viewportH, setViewportH] = useState(800);
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 767px)");
     const update = () => {
       setIsMobile(mq.matches);
+      setIsWide(window.innerWidth >= 1024);
       setViewportH(window.innerHeight);
     };
     update();
@@ -192,14 +200,21 @@ export default function LiveApp() {
   }, []);
   const padding = useMemo(() => {
     if (isMobile) {
-      const sheet = selected ? viewportH * 0.7 : sheetOpen ? viewportH * 0.74 : 138;
-      return { top: 0, bottom: Math.round(sheet), left: 0, right: 0 };
+      const peek = hasSelection ? DETAIL_PEEK_PX : LIST_PEEK_PX;
+      const bottom = (hasSelection ? detail.snap : list.snap) === "peek" ? peek : viewportH / 2;
+      return { top: TOP_BAR_PX, bottom: Math.round(bottom), left: 0, right: 0 };
     }
-    return { top: 0, bottom: 0, left: collapsed ? 0 : 384, right: selected ? 412 : 0 };
-  }, [isMobile, viewportH, selected, sheetOpen, collapsed]);
+    // Schmal (Tablet, Handy quer): die Details ersetzen die Liste
+    const listVisible = !collapsed && (isWide || !hasSelection);
+    return { top: 0, bottom: 0, left: listVisible ? 384 : 0, right: hasSelection ? 412 : 0 };
+  }, [isMobile, isWide, viewportH, hasSelection, list.snap, detail.snap, collapsed]);
+
+  // Kartenhinweise (Quellenangabe) über dem Blatt; bei ganz geöffnetem Blatt verdeckt es ohnehin die Karte
+  const active = selected ? detail : list;
+  const mapBottom = sheetHeightCss(active.snap === "full" ? "half" : active.snap, selected ? DETAIL_PEEK_PX : LIST_PEEK_PX);
 
   return (
-    <main className="fixed inset-0 overflow-hidden bg-bg text-fg">
+    <main className="fixed inset-0 overflow-hidden overscroll-none bg-bg text-fg" style={{ ["--map-bottom" as string]: mapBottom }}>
       <LiveMap
         trips={data.trips}
         shapes={data.shapes}
@@ -216,8 +231,19 @@ export default function LiveApp() {
         padding={padding}
       />
 
+      {/* Navigation (Handy) */}
+      <header className="absolute inset-x-0 top-0 z-20 border-b border-line bg-[var(--panel)] pt-[env(safe-area-inset-top)] backdrop-blur-md md:hidden">
+        <div className="page-x flex h-14 flex-col justify-center">
+          <AppNav active="karte" />
+        </div>
+      </header>
+
       {/* Hinweise oben mittig */}
-      <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex flex-col items-center gap-1.5 px-3 md:left-[392px] md:right-[420px]">
+      <div
+        className={`pointer-events-none absolute inset-x-0 top-[calc(4rem+env(safe-area-inset-top))] z-10 flex flex-col items-center gap-1.5 px-3 md:top-24 md:z-30 lg:left-[392px] lg:top-3 lg:right-[420px] ${
+          hasSelection ? "md:right-[420px]" : "md:left-[392px]"
+        }`}
+      >
         {stale && (
           <div className="pointer-events-auto">
             <Banner tone="warn">
@@ -235,14 +261,14 @@ export default function LiveApp() {
 
       {/* Datenquellenstatus */}
       <div
-        className={`absolute right-3 top-3 z-20 hidden flex-col items-end gap-1.5 transition-[right] duration-200 md:flex ${selected ? "md:right-[424px]" : ""}`}
+        className={`absolute right-[max(0.75rem,env(safe-area-inset-right))] top-3 z-20 hidden flex-col items-end gap-1.5 transition-[right] duration-200 md:flex ${selected ? "md:right-[424px]" : ""}`}
       >
         <SourceStatusBadge status={data.status} tripCount={onMapCount} fetchedAt={data.fetchedAt} error={data.error} now={now} />
         <ScannerBadge status={scanner} now={now} />
       </div>
 
       {/* Hinweis Schätzung */}
-      <div className={`pointer-events-none absolute bottom-3 z-10 hidden text-[10.5px] text-faint md:block ${collapsed ? "left-3" : "left-[396px]"}`}>
+      <div className={`pointer-events-none absolute bottom-3 z-10 hidden text-[10.5px] text-faint lg:block ${collapsed ? "left-3" : "left-[396px]"}`}>
         Alle Zugpositionen sind aus Fahrplan- und Echtzeitzeiten geschätzt – keine GPS-Ortung.
       </div>
 
@@ -261,19 +287,24 @@ export default function LiveApp() {
         </div>
       ) : null}
       <aside
-        style={{ ["--sheet-h" as string]: sheetOpen ? "74dvh" : "138px" }}
-        className={`absolute inset-x-0 bottom-0 z-20 flex h-[var(--sheet-h)] flex-col overflow-hidden rounded-t-xl border border-line bg-[var(--panel)] backdrop-blur-md transition-[height] duration-200 md:inset-x-auto md:bottom-3 md:left-3 md:top-3 md:h-auto md:w-[372px] md:rounded-lg ${
-          collapsed ? "md:hidden" : ""
-        } ${selected ? "max-md:hidden" : ""}`}
+        ref={list.sheetRef}
+        style={{ ["--sheet-h" as string]: list.height }}
+        className={`absolute inset-x-0 bottom-0 z-20 flex h-[var(--sheet-h)] flex-col overflow-hidden rounded-t-xl border border-line bg-[var(--panel)] backdrop-blur-md md:inset-x-auto md:bottom-3 md:left-[max(0.75rem,env(safe-area-inset-left))] md:top-3 md:h-auto md:w-[372px] md:rounded-lg ${
+          list.dragging ? "" : "transition-[height] duration-200"
+        } ${collapsed ? "md:hidden" : ""} ${hasSelection ? "max-lg:invisible" : ""}`}
       >
-        <button
-          className="flex h-5 w-full shrink-0 items-center justify-center md:hidden"
-          onClick={() => setSheetOpen((v) => !v)}
-          aria-label={sheetOpen ? "Liste verkleinern" : "Liste vergrößern"}
-        >
-          <span className="h-1 w-9 rounded-full bg-white/20" />
-        </button>
-        <div className="flex items-center gap-2 border-b border-line px-4 pb-2.5 md:pt-3">
+        {/* Griff (Handy): ziehen oder antippen */}
+        <div {...list.handleProps} className="shrink-0 touch-none select-none md:hidden">
+          <button
+            className="flex w-full flex-col items-center gap-2 px-4 pb-0.5 pt-2"
+            onClick={list.toggle}
+            aria-label={list.snap === "full" ? "Liste verkleinern" : "Liste vergrößern"}
+          >
+            <span className="h-1 w-9 rounded-full bg-white/25" />
+            <SourceStatusBadge status={data.status} tripCount={onMapCount} fetchedAt={data.fetchedAt} error={data.error} now={now} />
+          </button>
+        </div>
+        <div className="hidden items-center gap-2 border-b border-line px-4 pb-2.5 pt-3 md:flex">
           <div className="min-w-0 flex-1">
             <AppNav active="karte" />
           </div>
@@ -286,10 +317,14 @@ export default function LiveApp() {
             «
           </button>
         </div>
-        <div className="border-b border-line px-4 py-1.5 md:hidden">
-          <SourceStatusBadge status={data.status} tripCount={onMapCount} fetchedAt={data.fetchedAt} error={data.error} now={now} />
-        </div>
-        <div className="min-h-0 flex-1" onFocus={() => setSheetOpen(true)}>
+        <div
+          className="min-h-0 flex-1"
+          onFocus={(e) => {
+            // Suchfeld nach oben holen, damit die Tastatur die Treffer nicht verdeckt
+            if (e.target instanceof HTMLInputElement) list.setSnap("full");
+            else if (list.snap === "peek") list.setSnap("half");
+          }}
+        >
           <Sidebar
             query={query}
             onQuery={setQuery}
@@ -318,7 +353,11 @@ export default function LiveApp() {
       {selected && (
         <aside
           key={selected.trip.id}
-          className="anim-in absolute inset-x-0 bottom-0 z-30 h-[70dvh] overflow-hidden rounded-t-xl border border-line bg-[var(--panel)] backdrop-blur-md md:inset-x-auto md:bottom-3 md:right-3 md:top-3 md:h-auto md:w-[400px] md:rounded-lg"
+          ref={detail.sheetRef}
+          style={{ ["--sheet-h" as string]: detail.height }}
+          className={`anim-in absolute inset-x-0 bottom-0 z-30 h-[var(--sheet-h)] overflow-hidden rounded-t-xl border border-line bg-[var(--panel)] backdrop-blur-md md:inset-x-auto md:bottom-3 md:right-[max(0.75rem,env(safe-area-inset-right))] md:top-3 md:h-auto md:w-[400px] md:rounded-lg ${
+            detail.dragging ? "" : "transition-[height] duration-200"
+          }`}
         >
           <TrainDetail
             key={selected.trip.id}
@@ -331,6 +370,8 @@ export default function LiveApp() {
             onFollow={setFollow}
             onClose={() => select(null)}
             onReported={data.refresh}
+            handleProps={detail.handleProps}
+            onHandleTap={detail.toggle}
           />
         </aside>
       )}

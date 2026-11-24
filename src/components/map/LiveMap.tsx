@@ -1,7 +1,7 @@
 "use client";
 
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Map as MlMap, NavigationControl, type MapLayerMouseEvent } from "maplibre-gl";
+import { Map as MlMap, NavigationControl, type MapMouseEvent } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 import { lineColor, type Line, type LiveTrip, type RouteShape } from "@/lib/api";
 import type { LngLat } from "@/lib/geo";
@@ -39,6 +39,7 @@ export interface LiveMapProps {
 /** setData-Takt (~12 Hz); die Interpolation bleibt zeitbasiert. */
 const FRAME_MS = 1000 / 12;
 const GEO_BLEND_MS = 2000;
+const TOUCH_RADIUS_PX = 18;
 
 interface TrainAnim {
   smooth: SmoothState;
@@ -94,6 +95,15 @@ export default function LiveMap(props: LiveMapProps) {
 
       map.on("load", () => {
         if (cancelled) return;
+        // Handy: Quellenangabe nach einigen Sekunden hinter das (i) einklappen
+        if (window.matchMedia("(max-width: 767px), (max-height: 560px)").matches) {
+          window.setTimeout(() => {
+            if (cancelled) return;
+            const attrib = map.getContainer().querySelector(".maplibregl-ctrl-attrib");
+            attrib?.classList.remove("maplibregl-compact-show");
+            attrib?.removeAttribute("open");
+          }, 5000);
+        }
         addIcons(map);
         addAppLayers(map, base.kind);
         setReady(true);
@@ -101,9 +111,23 @@ export default function LiveMap(props: LiveMapProps) {
       // Fehlende Glyphen/Icons des Basisstyles nicht als harten Fehler behandeln
       map.on("styleimagemissing", () => undefined);
 
-      map.on("click", TRAIN_LAYERS, (e: MapLayerMouseEvent) => {
-        const id = e.features?.[0]?.properties?.id;
-        if (typeof id === "string") propsRef.current.onSelect(id);
+      // Finger treffen ungenauer als die Maus: im Umkreis suchen, nächstgelegener Zugkopf gewinnt
+      const coarse = window.matchMedia("(pointer: coarse)").matches;
+      map.on("click", (e: MapMouseEvent) => {
+        if (!map.getLayer(TRAIN_LAYERS[0])) return;
+        const r = coarse ? TOUCH_RADIUS_PX : 2;
+        const { x, y } = e.point;
+        const hits = map.queryRenderedFeatures([[x - r, y - r], [x + r, y + r]], { layers: TRAIN_LAYERS });
+        let best: { id: string; d: number } | null = null;
+        for (const f of hits) {
+          const id = f.properties?.id;
+          const head = typeof id === "string" ? headsRef.current.get(id) : undefined;
+          if (!head) continue;
+          const p = map.project(head);
+          const d = Math.hypot(p.x - x, p.y - y);
+          if (!best || d < best.d) best = { id, d };
+        }
+        if (best) propsRef.current.onSelect(best.id);
       });
       map.on("mouseenter", TRAIN_LAYERS, () => {
         map.getCanvas().style.cursor = "pointer";
@@ -269,7 +293,8 @@ export default function LiveMap(props: LiveMapProps) {
     if (!map || !ready || !selectedId) return;
     const fly = () => {
       const h = headsRef.current.get(selectedId);
-      if (h) map.flyTo({ center: h, zoom: Math.max(map.getZoom(), 14), speed: 1.4, essential: true });
+      // Ränder mitgeben: flyTo bricht die laufende Anpassung der Ränder ab
+      if (h) map.flyTo({ center: h, zoom: Math.max(map.getZoom(), 14), padding: propsRef.current.padding, speed: 1.4, essential: true });
       return !!h;
     };
     // Position steht evtl. erst nach dem nächsten Frame fest

@@ -83,9 +83,10 @@ export function Sidebar(p: SidebarProps) {
     (p.filters.dest ? 1 : 0) + (p.filters.station ? 1 : 0) + (p.filters.status !== "alle" ? 1 : 0);
   const vehicleLike = looksLikeVehicleNumber(p.query);
   const train = parseTrainNumber(p.query);
+  const searching = p.query.trim() !== "";
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col compact:block compact:overflow-y-auto compact:overscroll-contain">
       {/* Suche */}
       <div className="px-4 pt-3">
         <label className="relative block">
@@ -98,12 +99,15 @@ export function Sidebar(p: SidebarProps) {
             value={p.query}
             onChange={(e) => p.onQuery(e.target.value)}
             placeholder="Zugnummer, Ziel, Station, Fahrzeug …"
-            className="h-9 w-full rounded-md border border-line bg-black/30 pl-8 pr-8 text-[13px] text-fg placeholder:text-faint focus:border-[var(--line-strong)] focus:outline-none"
+            enterKeyHint="search"
+            autoCapitalize="none"
+            autoCorrect="off"
+            className="h-9 compact:h-11 w-full rounded-md border border-line bg-black/30 pl-8 pr-8 compact:pr-12 text-[13px] text-fg placeholder:text-faint focus:border-[var(--line-strong)] focus:outline-none"
           />
           {p.query && (
             <button
               onClick={() => p.onQuery("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 px-1 text-xs text-faint hover:text-fg"
+              className="absolute right-2 top-1/2 -translate-y-1/2 px-1 text-xs text-faint hover:text-fg compact:right-0 compact:grid compact:h-11 compact:w-11 compact:place-items-center"
               aria-label="Suche leeren"
             >
               ✕
@@ -118,7 +122,7 @@ export function Sidebar(p: SidebarProps) {
                 <li key={trip.id}>
                   <button
                     onClick={() => p.onSelect(trip.id)}
-                    className="flex w-full items-center gap-2 rounded-md border border-accent/30 bg-accent/[0.06] px-2.5 py-1.5 text-left text-[12px] hover:border-accent/60"
+                    className="flex w-full items-center gap-2 rounded-md border border-accent/30 bg-accent/[0.06] px-2.5 py-1.5 text-left text-[12px] compact:min-h-11 compact:text-[13px] hover:border-accent/60"
                   >
                     <LineBadge id={trip.line_id} color={ls.color} textColor={ls.textColor} size="sm" />
                     <span className="min-w-0 flex-1 truncate">
@@ -140,7 +144,7 @@ export function Sidebar(p: SidebarProps) {
         {(vehicleLike || train) && (
           <Link
             href={`/fahrzeuge?q=${encodeURIComponent(train ?? p.query.trim())}`}
-            className="mt-2 flex items-center justify-between rounded-md border border-line px-2.5 py-1.5 text-[12px] text-muted hover:border-[var(--line-strong)] hover:text-fg"
+            className="mt-2 flex items-center justify-between rounded-md border border-line px-2.5 py-1.5 text-[12px] text-muted hover:border-[var(--line-strong)] hover:text-fg compact:min-h-11 compact:text-[13px]"
           >
             <span>
               {train ? `Alle Fahrten von Zug ${train}` : `Fahrzeug „${p.query.trim()}“`} in der Fahrzeugsuche öffnen
@@ -150,14 +154,15 @@ export function Sidebar(p: SidebarProps) {
         )}
       </div>
 
-      {p.scan && <div className="px-4 pt-2">{p.scan}</div>}
+      {/* Beim Suchen auf dem Handy rücken die Treffer direkt unter das Suchfeld */}
+      {p.scan && <div className={`px-4 pt-2 ${searching ? "compact:hidden" : ""}`}>{p.scan}</div>}
 
       {/* Linien-Chips */}
-      <div className="px-4 pt-3">
+      <div className={`px-4 pt-3 ${searching ? "compact:hidden" : ""}`}>
         <div className="mb-1.5 flex items-baseline justify-between">
           <h2 className="text-[10px] font-medium uppercase tracking-[0.12em] text-faint">Linien</h2>
           {p.focusLine && (
-            <button onClick={() => p.onFocusLine(null)} className="text-[11px] text-muted hover:text-fg">
+            <button onClick={() => p.onFocusLine(null)} className="text-[11px] text-muted hover:text-fg compact:-my-3 compact:py-3 compact:text-[13px]">
               Hervorhebung aufheben
             </button>
           )}
@@ -170,7 +175,7 @@ export function Sidebar(p: SidebarProps) {
             return (
               <div
                 key={l.id}
-                className={`group flex h-7 items-stretch overflow-hidden rounded-md border text-[12px] transition-colors ${
+                className={`group flex h-7 compact:h-10 items-stretch overflow-hidden rounded-md border text-[12px] transition-colors ${
                   focused ? "border-[var(--line-strong)] bg-white/[0.06]" : "border-line"
                 } ${hidden ? "opacity-45" : ""}`}
               >
@@ -178,7 +183,8 @@ export function Sidebar(p: SidebarProps) {
                   onClick={() => p.onToggleLine(l.id)}
                   title={hidden ? `${l.id} einblenden` : `${l.id} ausblenden`}
                   aria-pressed={!hidden}
-                  className="grid w-6 place-items-center hover:bg-white/5"
+                  className="grid w-6 compact:w-10 place-items-center hover:bg-white/5"
+                  aria-label={hidden ? `${l.id} einblenden` : `${l.id} ausblenden`}
                 >
                   <span
                     className="h-2.5 w-2.5 rounded-full border-2"
@@ -189,7 +195,7 @@ export function Sidebar(p: SidebarProps) {
                   onClick={() => p.onFocusLine(focused ? null : l.id)}
                   disabled={hidden}
                   title={`${l.id} hervorheben`}
-                  className="flex items-center gap-1.5 border-l border-line pl-1.5 pr-2 font-semibold hover:bg-white/5 disabled:cursor-not-allowed"
+                  className="flex items-center gap-1.5 border-l border-line pl-1.5 pr-2 compact:px-2.5 compact:text-[13px] font-semibold hover:bg-white/5 disabled:cursor-not-allowed"
                 >
                   {l.id}
                   <span className="tnum font-normal text-faint">{l.count}</span>
@@ -205,7 +211,7 @@ export function Sidebar(p: SidebarProps) {
       <div className="px-4 pt-3">
         <button
           onClick={() => setFiltersOpen((v) => !v)}
-          className="flex w-full items-center justify-between text-[10px] font-medium uppercase tracking-[0.12em] text-faint hover:text-muted"
+          className="flex w-full items-center justify-between text-[10px] font-medium uppercase tracking-[0.12em] text-faint hover:text-muted compact:min-h-11 compact:text-[12px]"
           aria-expanded={filtersOpen}
         >
           <span>
@@ -236,7 +242,7 @@ export function Sidebar(p: SidebarProps) {
             {activeFilters > 0 && (
               <button
                 onClick={() => p.onFilters({ dest: "", station: "", status: "alle" })}
-                className="justify-self-start text-[11px] text-muted hover:text-fg"
+                className="justify-self-start text-[11px] text-muted hover:text-fg compact:min-h-11 compact:text-[13px]"
               >
                 Filter zurücksetzen
               </button>
@@ -252,7 +258,7 @@ export function Sidebar(p: SidebarProps) {
           {p.items.length} / {p.totalCount}
         </span>
       </div>
-      <ul className="scroll-thin min-h-0 flex-1 overflow-y-auto pb-4">
+      <ul className="scroll-thin sheet-b min-h-0 flex-1 overflow-y-auto compact:overflow-visible">
         {p.loading && p.items.length === 0 && <li className="px-4 py-6 text-[12px] text-faint">Lade Fahrten …</li>}
         {!p.loading && p.items.length === 0 && (
           <li className="px-4 py-6 text-[12px] leading-relaxed text-faint">
@@ -290,7 +296,7 @@ function Select({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-8 min-w-0 rounded-md border border-line bg-black/30 px-2 text-[12px] text-fg focus:outline-none"
+        className="h-8 compact:h-11 min-w-0 rounded-md border border-line bg-black/30 px-2 text-[12px] text-fg focus:outline-none"
       >
         {options.map(([v, l]) => (
           <option key={v} value={v} className="bg-[var(--panel-solid)]">
@@ -317,10 +323,11 @@ function TrainRow({
   const plat = platformInfo(s.nextStop);
   const onMap = s.position != null;
   return (
-    <li>
+    // Zeilen außerhalb des sichtbaren Bereichs zeichnet der Browser nicht
+    <li className="[contain-intrinsic-size:auto_60px] [content-visibility:auto]">
       <button
         onClick={() => onSelect(t.id)}
-        className={`relative grid w-full grid-cols-[auto_1fr_auto] gap-x-3 gap-y-0.5 border-b border-line px-4 py-2.5 text-left transition-colors hover:bg-white/[0.03] ${
+        className={`relative grid w-full grid-cols-[auto_1fr_auto] gap-x-3 gap-y-0.5 border-b border-line px-4 py-2.5 compact:py-3 text-left transition-colors hover:bg-white/[0.03] active:bg-white/[0.06] ${
           selected ? "bg-white/[0.05]" : ""
         } ${t.cancelled ? "opacity-70" : ""}`}
       >
@@ -329,14 +336,14 @@ function TrainRow({
           <LineBadge id={t.line_id} color={lineStyle.color} textColor={lineStyle.textColor} />
         </div>
         <div className="min-w-0">
-          <div className="truncate text-[13px] text-fg">
+          <div className="truncate text-[13px] text-fg compact:text-[15px]">
             <span className={t.cancelled ? "line-through" : ""}>→ {t.destination_name ?? "Ziel unbekannt"}</span>
           </div>
         </div>
-        <div className="text-right text-[12px]">
+        <div className="text-right text-[12px] compact:text-[14px]">
           <Delay minutes={s.delay} compact />
         </div>
-        <div className="min-w-0 truncate text-[11.5px] text-muted">
+        <div className="min-w-0 truncate text-[11.5px] text-muted compact:text-[12.5px]">
           <span className="tnum text-faint">{t.train_number ?? "–"}</span>
           <span className="mx-1.5 text-faint">·</span>
           {s.status === "ausfall" ? (
