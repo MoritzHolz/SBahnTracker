@@ -195,7 +195,10 @@ Verschieben ändert nur den geschätzten Ort (`moved_at`, `moved_from_name`), es
 - Wiederholte Läufe aktualisieren denselben Eintrag (eindeutiger Schlüssel).
 - Per Regel verschobene Fahrzeuge (`moved_at`) fehlen in der Ausgabe, nur ihre Anzahl wird gezeigt.
 - Waggons: gelesene Wagennummern je Einheit, sonst 4.
-- Aufzeichnung ab `private.app_config.stabling_log_from`. Zeitraum der Wochenübersicht: `LOG_FROM`/`LOG_TO` in `src/lib/stabling.ts`.
+- Neuer Eintrag nur, wenn in den ersten 2 h der Standzeit mindestens die Hälfte aller Fahrten gelesen wurde. `departed_at` nur bei Sicherheit ≥ 0,5 am Ende, sonst nur `seen_again_at`.
+- Schwabstraße: laut Plan kürzere Wenden als 15 min (also nur verspätete) zählen nie als Abstellung.
+- Aufzeichnung ab `private.app_config.stabling_log_from`. Die Zeit vor dem 25.11.2026, 14:35 Uhr wurde einmalig aus den vorhandenen Scans nachgerechnet (`20261125180000_stabling_log_accuracy.sql`).
+- Die Seite zeigt eine Woche (Mo–So) und blättert bis `FIRST_WEEK` zurück.
 
 ## Kosten
 

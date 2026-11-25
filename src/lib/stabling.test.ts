@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chronicle, daySegments, dayStart, fmtDay, fmtStay, groupByStation, LOG_FROM, periodDays, stayText, type StablingEntry } from "./stabling";
+import { addDays, chronicle, daySegments, dayStart, FIRST_WEEK, fmtDay, fmtStay, groupByStation, LIVE_FROM, stayText, weekDays, weekLabel, weekNumber, weekOf, type StablingEntry } from "./stabling";
 
 const e = (o: Partial<StablingEntry>): StablingEntry => ({
   station_id: "b", station_name: "Backnang", service_date: "2026-11-25", line_id: "S3", train_number: "7301", origin_name: "Vaihingen",
@@ -9,9 +9,21 @@ const e = (o: Partial<StablingEntry>): StablingEntry => ({
 });
 
 describe("Abstellprotokoll", () => {
-  it("wertet alle Tage im Zeitraum aus, auch das Wochenende", () => {
-    expect(periodDays()).toEqual(["2026-11-25", "2026-11-26", "2026-11-27", "2026-11-28", "2026-11-29", "2026-11-30", "2026-12-01", "2026-12-02"]);
-    expect(fmtDay(LOG_FROM)).toBe("Mi 25.11.");
+  it("rechnet Wochen von Montag bis Sonntag", () => {
+    expect(weekOf("2026-11-25")).toBe(FIRST_WEEK);
+    expect(weekOf("2026-11-29")).toBe("2026-11-23");
+    expect(weekOf("2026-11-30")).toBe("2026-11-30");
+    expect(weekDays("2026-11-23").at(-1)).toBe("2026-11-29");
+    expect(addDays("2026-12-28", 7)).toBe("2027-01-04");
+    expect(fmtDay(LIVE_FROM)).toBe("Mi 25.11.");
+  });
+
+  it("zählt Kalenderwochen nach ISO, auch über den Jahreswechsel", () => {
+    expect(weekLabel("2026-11-23")).toBe("KW 48 · 23.11.–29.11.2026");
+    expect(weekNumber("2026-12-28")).toBe(53);
+    expect(weekNumber("2027-01-04")).toBe(1);
+    expect(weekLabel("2026-12-28")).toBe("KW 53 · 28.12.–03.01.2027");
+    expect(weekNumber("2025-12-29")).toBe(1);
   });
 
   it("kennt Mitternacht in Sommer- und Winterzeit", () => {
@@ -38,6 +50,13 @@ describe("Abstellprotokoll", () => {
     expect(b.to).toBeCloseTo(5 / 24 + 10 / 1440);
     expect([b.before, b.after]).toEqual([true, false]);
     expect(daySegments([e({})], "2026-11-27", now)).toEqual([]);
+  });
+
+  it("zeichnet unbestätigte Abstellungen höchstens 48 h", () => {
+    const now = Date.parse("2026-12-02T12:00:00Z");
+    const open = { departed_at: null, seen_again_at: null };
+    expect(daySegments([e({ ...open, state: "unconfirmed" })], "2026-11-30", now)).toEqual([]);
+    expect(daySegments([e({ ...open, state: "open" })], "2026-11-30", now)).toHaveLength(1);
   });
 
   it("sortiert nach Bahnhof und darin nach Zeit", () => {

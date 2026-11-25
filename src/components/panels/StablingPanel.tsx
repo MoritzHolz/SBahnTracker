@@ -1,30 +1,33 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { DataBadge, LineBadge } from "@/components/ui/Badges";
 import { useNow } from "@/hooks/useLiveData";
 import { fetchLines, lineColor, lineTextColor, type Line } from "@/lib/api";
 import {
+  addDays,
   chronicle,
   dayKey,
   daySegments,
   dayStart,
   entryKey,
-  fetchStablingLog,
+  fetchStablingWeek,
+  FIRST_WEEK,
   fmtDay,
   groupByStation,
-  periodDays,
   stayText,
+  weekDays,
+  weekLabel,
+  weekOf,
   type ChronicleItem,
   type StablingEntry,
-  type StablingLog,
+  type StablingWeek,
 } from "@/lib/stabling";
 import { fmtTime } from "@/lib/time";
 import { AppNav } from "./StatusBar";
 
 const REFRESH_MS = 60_000;
-const DAYS = periodDays();
 const VIOLET = "#c4a7ff";
 
 type View = "bahnhof" | "verlauf" | "chronik";
@@ -38,7 +41,14 @@ type LineStyleFn = (id: string) => { color: string; textColor: string };
 
 export function StablingPanel() {
   const now = useNow(30_000);
-  const [log, setLog] = useState<StablingLog | null>(null);
+  const today = dayKey(now);
+  const thisWeek = weekOf(today);
+  /** null = laufende Woche, springt am Montag von selbst weiter */
+  const [picked, setPicked] = useState<string | null>(null);
+  const week = picked ?? thisWeek;
+  const days = useMemo(() => weekDays(week), [week]);
+  const [data, setData] = useState<StablingWeek | null>(null);
+  const log = data?.week === week ? data : null;
   const [error, setError] = useState<string | null>(null);
   const [lines, setLines] = useState<Map<string, Line>>(() => new Map());
   const [view, setView] = useState<View>("bahnhof");
@@ -47,11 +57,12 @@ export function StablingPanel() {
 
   useEffect(() => {
     let alive = true;
+    setError(null);
     const load = () =>
-      fetchStablingLog().then(
+      fetchStablingWeek(week).then(
         (l) => {
           if (!alive) return;
-          setLog(l);
+          setData(l);
           setError(null);
         },
         (e: Error) => alive && setError(e.message),
@@ -65,23 +76,32 @@ export function StablingPanel() {
       window.clearInterval(id);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, []);
+  }, [week]);
+  const goTo = (w: string) => {
+    setPicked(w >= thisWeek ? null : w);
+    setDay("");
+  };
   useEffect(() => {
     fetchLines().then((l) => setLines(new Map(l.map((x) => [x.id, x]))), () => {});
   }, []);
 
   const lineStyle: LineStyleFn = (id) => ({ color: lineColor(lines, id), textColor: lineTextColor(lines, id) });
   const all = useMemo(() => log?.entries ?? [], [log]);
+  // samt Standzeiten, die in der Vorwoche begannen (Zeitverlauf, Chronik)
+  const withEarlier = useMemo(() => [...(log?.earlier ?? []), ...all], [log, all]);
   const stations = useMemo(() => groupByStation(all), [all]);
-  const atStation = useMemo(() => (station ? all.filter((e) => e.station_id === station) : all), [all, station]);
+  const here = useCallback((e: StablingEntry) => !station || e.station_id === station, [station]);
+  const atStation = useMemo(() => all.filter(here), [all, here]);
+  const running = useMemo(() => withEarlier.filter(here), [withEarlier, here]);
   // Tabelle: Tag der Abstellung. Zeitverlauf: alles, was an dem Tag dort stand.
   const shown = useMemo(() => (day ? atStation.filter((e) => dayKey(e.arrived_at) === day) : atStation), [atStation, day]);
   // Chronik: Tag des Ereignisses, damit Ausfahrten am Folgetag erscheinen
-  const events = useMemo(() => chronicle(atStation).filter((i) => !day || dayKey(i.at) === day), [atStation, day]);
+  const events = useMemo(() => chronicle(running).filter((i) => (day ? dayKey(i.at) === day : weekOf(dayKey(i.at)) === week)), [running, day, week]);
   const open = shown.filter((e) => e.state === "open").length;
-  const today = now ? dayKey(now) : "";
-  const timelineDay = day || (DAYS.includes(today) ? today : DAYS.filter((d) => d < today).at(-1) ?? DAYS[0]);
+  const timelineDay = day || (days.includes(today) ? today : days[0]);
 
+  const weekBtn =
+    "grid h-9 min-w-9 shrink-0 place-items-center rounded-md border border-line text-[18px] leading-none text-fg hover:bg-white/[0.06] disabled:opacity-30 compact:h-11 compact:min-w-11";
   const select =
     "h-9 min-w-0 rounded-md border border-line bg-black/30 px-2 text-[13px] text-fg compact:h-11 compact:text-[16px] [color-scheme:dark]";
 
@@ -99,8 +119,31 @@ export function StablingPanel() {
           <DataBadge state="vermutung" label="Aus Scans erkannt" />
         </div>
         <p className="mt-1 text-[13px] leading-relaxed text-muted">
-          Mi 25.11.2026, 14:35 Uhr bis Mi 02.12.2026, einschließlich Wochenende.
+          Welcher Zug wann und wo abgestellt war, Woche für Woche.
         </p>
+
+        <nav aria-label="Woche" className="mt-4 flex items-center gap-2">
+          <button className={weekBtn} onClick={() => goTo(addDays(week, -7))} disabled={week <= FIRST_WEEK} aria-label="Vorherige Woche">
+            ‹
+          </button>
+          <h2 aria-live="polite" className="tnum min-w-0 whitespace-nowrap text-center text-[15px] font-semibold max-[374px]:text-[13px] max-sm:flex-1 sm:min-w-[15rem]">
+            {weekLabel(week)}
+            {week === thisWeek && <span className="block text-[12px] font-normal text-muted">diese Woche</span>}
+          </h2>
+          <button className={weekBtn} onClick={() => goTo(addDays(week, 7))} disabled={week >= thisWeek} aria-label="Nächste Woche">
+            ›
+          </button>
+          {week !== thisWeek && (
+            <button className={`${weekBtn} px-3 text-[13px] font-medium max-sm:hidden`} onClick={() => goTo(thisWeek)}>
+              Diese Woche
+            </button>
+          )}
+        </nav>
+        {week === FIRST_WEEK && (
+          <p className="mt-3 text-[12px] leading-relaxed text-faint">
+            Vor Mi 25.11., 14:35 Uhr nachträglich aus den damaligen Scans ergänzt. Gescannt wurde nur zeitweise, deshalb fehlen viele Züge und Abfahrten.
+          </p>
+        )}
 
         {error && <p role="alert" className="mt-4 text-[13px] text-bad">Protokoll nicht abrufbar: {error}</p>}
         {!log && !error && <p className="mt-6 text-[13px] text-faint">Protokoll wird geladen …</p>}
@@ -137,7 +180,7 @@ export function StablingPanel() {
               </select>
               <select aria-label="Tag" value={day} onChange={(e) => setDay(e.target.value)} className={`${select} max-sm:flex-1`}>
                 <option value="">Alle Tage</option>
-                {DAYS.map((d) => (
+                {days.map((d) => (
                   <option key={d} value={d}>
                     {fmtDay(dayStart(d))}
                   </option>
@@ -147,13 +190,13 @@ export function StablingPanel() {
 
             <div className="mt-4">
               {view === "verlauf" ? (
-                <Timeline list={atStation} day={timelineDay} setDay={setDay} now={now} today={today} />
+                <Timeline list={running} days={days} day={timelineDay} setDay={setDay} now={now} today={today} />
               ) : view === "chronik" && events.length > 0 ? (
                 <Chronicle items={events} lineStyle={lineStyle} />
               ) : view === "bahnhof" && shown.length > 0 ? (
                 <StationTables list={shown} now={now} lineStyle={lineStyle} />
               ) : (
-                <Empty filtered={all.length > 0} />
+                <Empty filtered={all.length > 0} past={week !== thisWeek} />
               )}
             </div>
 
@@ -162,6 +205,7 @@ export function StablingPanel() {
               <ul className="mt-2 list-disc space-y-1 pl-4">
                 <li>Ein Eintrag entsteht, wenn ein gelesener Zug 45 min nach der Ankunft in keiner gelesenen Abfahrt auftaucht. An der Schwabstraße gilt das nach 15 min und nur für Abfahrten vom Gegengleis.</li>
                 <li>Zeiten stammen aus Fahrplan und Echtzeit. Ankunft heißt: Ende der letzten Fahrt. Wurde die nächste Fahrt an einem anderen Bahnhof gelesen, bleibt die Abfahrt unbekannt.</li>
+                <li>Eine Abfahrt gilt nur als beobachtet, wenn genug Abfahrten dazwischen gelesen wurden. Verspätete, aber planmäßige Wenden an der Schwabstraße zählen nicht als Abstellung.</li>
                 <li>Nicht im Protokoll: Züge, die nach 48 h (Schwabstraße 60 min) automatisch nach Plochingen verschoben wurden. Dazu zählen auch lange Standzeiten übers Wochenende. Für Plochingen selbst gilt die Regel nicht.</li>
                 <li>Ohne Scans entsteht kein Eintrag. Lücken in der Nacht schließt der Zeitplan im <Link href="/scanner" className="text-fg underline decoration-white/30 underline-offset-2">Scanner</Link>.</li>
               </ul>
@@ -183,12 +227,14 @@ function Stat({ k, v, hint }: { k: string; v: number; hint?: string }) {
   );
 }
 
-function Empty({ filtered }: { filtered: boolean }) {
+function Empty({ filtered, past }: { filtered: boolean; past: boolean }) {
   return (
     <p className="rounded-lg border border-line px-5 py-8 text-center text-[13px] leading-relaxed text-muted">
       {filtered
         ? "Für diese Auswahl gibt es keine Abstellung."
-        : "Noch keine Abstellung erkannt. Die ersten Einträge erscheinen frühestens 45 min nach der Ankunft eines gelesenen Zuges."}
+        : past
+          ? "In dieser Woche wurde keine Abstellung erkannt."
+          : "Noch keine Abstellung erkannt. Die ersten Einträge erscheinen frühestens 45 min nach der Ankunft eines gelesenen Zuges."}
     </p>
   );
 }
@@ -319,15 +365,15 @@ function StationTables({ list, now, lineStyle }: { list: StablingEntry[]; now: n
 
 const TICKS = [0, 3, 6, 9, 12, 15, 18, 21, 24];
 
-function Timeline({ list, day, setDay, now, today }: { list: StablingEntry[]; day: string; setDay: (d: string) => void; now: number; today: string }) {
+function Timeline({ list, days, day, setDay, now, today }: { list: StablingEntry[]; days: string[]; day: string; setDay: (d: string) => void; now: number; today: string }) {
   const segs = daySegments(list, day, now);
   const groups = groupByStation(segs.map((s) => s.entry));
   const byKey = new Map(segs.map((s) => [entryKey(s.entry), s]));
-  const nowAt = day === today ? (now - dayStart(day)) / 86_400_000 : null;
+  const nowAt = day === today ? (now - dayStart(day)) / (dayStart(addDays(day, 1)) - dayStart(day)) : null;
   return (
     <section className="rounded-lg border border-line p-4">
       <div role="group" aria-label="Tag wählen" className="flex flex-wrap gap-1.5">
-        {DAYS.map((d) => (
+        {days.map((d) => (
           <button
             key={d}
             aria-pressed={d === day}

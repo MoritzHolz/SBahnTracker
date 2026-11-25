@@ -36,15 +36,36 @@ export interface StablingLog {
   entries: StablingEntry[];
 }
 
-/** Auswertungszeitraum: ab Beginn der Aufzeichnung bis einschließlich Mi 02.12.2026, alle Tage */
-export const LOG_FROM = "2026-11-25T14:35:00+01:00";
-export const LOG_TO = "2026-12-03T00:00:00+01:00";
+/** Laufende Aufzeichnung seit hier; davor rückwirkend aus den vorhandenen Scans ergänzt */
+export const LIVE_FROM = "2026-11-25T14:35:00+01:00";
+/** Montag der ersten Woche mit Daten */
+export const FIRST_WEEK = "2026-11-23";
 
-export async function fetchStablingLog(from = LOG_FROM, to = LOG_TO, weekdaysOnly = false): Promise<StablingLog> {
-  const { data, error } = await getSupabase().rpc("get_stabling_log", { p_from: from, p_to: to, p_weekdays_only: weekdaysOnly });
+async function fetchRange(from: number, to: number): Promise<StablingLog> {
+  const { data, error } = await getSupabase().rpc("get_stabling_log", {
+    p_from: new Date(from).toISOString(),
+    p_to: new Date(to).toISOString(),
+    p_weekdays_only: false,
+  });
   if (error) throw new Error(`get_stabling_log: ${error.message}`);
   const d = (data ?? {}) as Partial<StablingLog>;
   return { moved: d.moved ?? 0, entries: Array.isArray(d.entries) ? d.entries : [] };
+}
+
+export interface StablingWeek {
+  /** Montag der Woche */
+  week: string;
+  moved: number;
+  /** in dieser Woche abgestellt */
+  entries: StablingEntry[];
+  /** in der Woche davor abgestellt (für Standzeiten über den Wochenwechsel) */
+  earlier: StablingEntry[];
+}
+
+export async function fetchStablingWeek(week: string): Promise<StablingWeek> {
+  const a = dayStart(week);
+  const [cur, prev] = await Promise.all([fetchRange(a, dayStart(addDays(week, 7))), fetchRange(dayStart(addDays(week, -7)), a)]);
+  return { week, moved: cur.moved, entries: cur.entries, earlier: prev.entries };
 }
 
 export const entryKey = (e: StablingEntry) => `${e.service_date}|${e.line_id}|${e.train_number}|${e.vehicles.join()}`;
@@ -69,13 +90,31 @@ export function dayStart(key: string): number {
   return utc;
 }
 
-const nextDay = (key: string) => new Date(Date.parse(`${key}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+/** Kalendertag plus n Tage */
+export const addDays = (key: string, n: number) => new Date(Date.parse(`${key}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
-/** Alle Kalendertage im Zeitraum, auch Samstag und Sonntag */
-export function periodDays(from = LOG_FROM, to = LOG_TO): string[] {
-  const days: string[] = [];
-  for (let k = dayKey(from); dayStart(k) < Date.parse(to); k = nextDay(k)) days.push(k);
-  return days;
+/** Montag der Woche, in der der Kalendertag liegt */
+export function weekOf(key: string): string {
+  const wd = new Date(`${key}T12:00:00Z`).getUTCDay();
+  return addDays(key, -((wd + 6) % 7));
+}
+
+/** Montag bis Sonntag */
+export const weekDays = (week: string) => Array.from({ length: 7 }, (_, i) => addDays(week, i));
+
+/** Kalenderwoche nach ISO 8601 (wie in Deutschland üblich) */
+export function weekNumber(week: string): number {
+  const thursday = addDays(week, 3);
+  const first = weekOf(`${thursday.slice(0, 4)}-01-04`);
+  return Math.round((Date.parse(week) - Date.parse(first)) / (7 * 86_400_000)) + 1;
+}
+
+const dm = (key: string) => `${key.slice(8)}.${key.slice(5, 7)}.`;
+
+/** „KW 48 · 23.11.–29.11.2026“ */
+export function weekLabel(week: string): string {
+  const end = addDays(week, 6);
+  return `KW ${weekNumber(week)} · ${dm(week)}–${dm(end)}${end.slice(0, 4)}`;
 }
 
 /** „5 h 40 min“, „2 Tage 3 h“ */
@@ -132,13 +171,14 @@ export interface Segment {
 /** Balken eines Tages; Abstellungen über Mitternacht werden an der Tagesgrenze geteilt. */
 export function daySegments(list: StablingEntry[], key: string, now: number): Segment[] {
   const a = dayStart(key);
-  const b = dayStart(nextDay(key));
+  const b = dayStart(addDays(key, 1));
   const out: Segment[] = [];
   for (const entry of list) {
     const s = Date.parse(entry.arrived_at);
     const end = Date.parse(entry.departed_at ?? entry.seen_again_at ?? "");
     const running = !Number.isFinite(end);
-    const e = running ? Math.max(now, s) : end;
+    // Ohne Bestätigung nicht endlos weiterzeichnen (nach 48 h greift ohnehin die Plochingen-Regel)
+    const e = !running ? end : Math.max(s, entry.state === "unconfirmed" ? Math.min(now, s + 48 * 3_600_000) : now);
     if (s >= b || e <= a) continue;
     out.push({ entry, from: (Math.max(s, a) - a) / (b - a), to: (Math.min(e, b) - a) / (b - a), before: s < a, after: e > b });
   }
