@@ -17,7 +17,7 @@ import { FallbackMap } from "./FallbackMap";
 import type { ParkingSite } from "@/lib/parking";
 import { isStaleWebOnly } from "@/lib/scanner";
 import { addAppLayers, MODEL_ZOOM, PARKING_LAYER, setSourceData, SRC_PARKING, SRC_ROUTES, SRC_STATIONS, SRC_TRAINS, TRAIN_LAYERS } from "./layers";
-import { addIcons, configureMaplibre, EXTRA_ATTRIBUTION, resolveBaseStyle, type BaseStyleKind } from "./maplibre";
+import { addIcons, BASE_SOURCE, configureMaplibre, EXTRA_ATTRIBUTION, resolveBaseStyle, type BaseStyleKind } from "./maplibre";
 
 export interface LiveMapProps {
   trips: LiveTrip[];
@@ -53,6 +53,7 @@ const SLOW_MS = 10_000;
 const STABLE_MS = 60_000;
 /** Hintergrundkarte nicht erreichbar: einmal später erneut versuchen */
 const BASE_RETRY_MS = 30_000;
+const BASE_BLOCKED = "Kartenhintergrund nicht ladbar. Vielleicht sperrt ihn ein Werbeblocker (Brave: Löwen-Symbol).";
 const GEO_BLEND_MS = 2000;
 const TOUCH_RADIUS_PX = 18;
 
@@ -148,6 +149,17 @@ export default function LiveMap(props: LiveMapProps) {
       map.on("moveend", () => {
         const c = map.getCenter();
         viewRef.current = { center: [c.lng, c.lat], zoom: map.getZoom() };
+      });
+      // Kacheln nicht ladbar: häufig sperrt ein Werbeblocker den Kartendienst
+      let baseOk = false;
+      map.on("error", (e) => {
+        console.error(e.error);
+        if (!baseOk && (e as { sourceId?: string }).sourceId === BASE_SOURCE) setStyleError(BASE_BLOCKED);
+      });
+      map.on("sourcedata", (e) => {
+        if (baseOk || e.sourceId !== BASE_SOURCE || !e.tile) return;
+        baseOk = true;
+        setStyleError((m) => (m === BASE_BLOCKED ? null : m));
       });
       map.on("webglcontextlost", () => {
         window.clearTimeout(stableTimer);
@@ -441,7 +453,11 @@ export default function LiveMap(props: LiveMapProps) {
         </div>
       )}
       {styleError && (
-        <div className="pointer-events-none absolute bottom-10 left-1/2 -translate-x-1/2 rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-[11px] text-[var(--muted)]">
+        <div
+          role="status"
+          style={{ left: `calc(50% + ${(props.padding.left - props.padding.right) / 2}px)`, maxWidth: `calc(100% - ${props.padding.left + props.padding.right + 24}px)` }}
+          className="pointer-events-none absolute bottom-10 w-max -translate-x-1/2 rounded max-md:bottom-[calc(var(--map-bottom,0px)+3.5rem)] border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-[11px] text-[var(--muted)]"
+        >
           {styleError}
         </div>
       )}

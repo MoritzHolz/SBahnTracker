@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, chronicle, daySegments, dayStart, FIRST_WEEK, fmtDay, fmtStay, groupByStation, LIVE_FROM, stayText, weekDays, weekLabel, weekNumber, weekOf, type StablingEntry } from "./stabling";
+import { addDays, chronicle, entryKey, daySegments, dayStart, FIRST_WEEK, fmtDay, fmtStay, groupByStation, LIVE_FROM, stayText, weekDays, weekLabel, weekNumber, weekOf, type StablingEntry } from "./stabling";
 
 const e = (o: Partial<StablingEntry>): StablingEntry => ({
   station_id: "b", station_name: "Backnang", service_date: "2026-11-25", line_id: "S3", train_number: "7301", origin_name: "Vaihingen",
@@ -78,5 +78,13 @@ describe("Abstellprotokoll", () => {
       e({ train_number: "8", arrived_at: "2026-11-25T21:30:00Z", departed_at: null, seen_again_at: null, state: "open" }),
     ]);
     expect(c.map((x) => `${x.entry.train_number}:${x.kind}`)).toEqual(["9:in", "8:in", "7301:in", "7301:out", "9:seen"]);
+  });
+  it("führt Überführungen an beiden Bahnhöfen, ohne erfundene Zeiten", () => {
+    const seen = "2026-11-26T10:31:00Z";
+    const away = e({ departed_at: null, seen_again_at: seen, seen_again_station: "Vaihingen", state: "seen_again", transfer_to: "Vaihingen" });
+    const there = e({ station_id: "v", station_name: "Vaihingen", arr_platform: null, departed_at: seen, dep_train_number: "7326", seen_again_at: null, transfer_from: "Backnang" });
+    expect(entryKey(away)).not.toBe(entryKey(there));
+    expect(stayText(there, 0)).toBe("höchstens 12 h 1 min");
+    expect(chronicle([away, there]).map((i) => `${i.kind} ${i.entry.station_name}`)).toEqual(["in Backnang", "out Vaihingen"]);
   });
 });

@@ -2,6 +2,7 @@
  * Protokoll der Abstellungen (RPC get_stabling_log). Einträge entstehen in der
  * Datenbank aus gelesenen Zügen; hier wird nur angezeigt und sortiert.
  * Per Regel nach Plochingen verschobene Züge sind nicht enthalten.
+ * Überführungen (nächste Fahrt begann an einem anderen Bahnhof) erscheinen zweimal: am Abstellbahnhof (transfer_to) und am neuen Bahnhof (transfer_from).
  */
 import { getSupabase } from "./supabase";
 import { TZ } from "./time";
@@ -26,6 +27,15 @@ export interface StablingEntry {
   dep_destination: string | null;
   seen_again_at: string | null;
   seen_again_station: string | null;
+  seen_again_station_id?: string | null;
+  /** erste Fahrt danach, auch wenn sie an einem anderen Bahnhof begann */
+  next_line_id?: string | null;
+  next_train_number?: string | null;
+  next_destination?: string | null;
+  /** nächste Fahrt begann an einem anderen Bahnhof: dorthin überführt (Annahme) */
+  transfer_to?: string | null;
+  /** Zeile am neuen Bahnhof: von hier überführt, Ankunft dort unbekannt, Abfahrt beobachtet */
+  transfer_from?: string | null;
   confidence: number;
   state: StablingState;
 }
@@ -68,7 +78,7 @@ export async function fetchStablingWeek(week: string): Promise<StablingWeek> {
   return { week, moved: cur.moved, entries: cur.entries, earlier: prev.entries };
 }
 
-export const entryKey = (e: StablingEntry) => `${e.service_date}|${e.line_id}|${e.train_number}|${e.vehicles.join()}`;
+export const entryKey = (e: StablingEntry) => `${e.station_id}|${e.service_date}|${e.line_id}|${e.train_number}|${e.vehicles.join()}`;
 
 const dayKeyFmt = new Intl.DateTimeFormat("sv-SE", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" });
 const dayFmt = new Intl.DateTimeFormat("de-DE", { timeZone: TZ, weekday: "short", day: "2-digit", month: "2-digit" });
@@ -129,6 +139,8 @@ export function fmtStay(ms: number): string {
 /** Standzeit; ohne beobachtete Abfahrt nur so genau, wie es belegt ist */
 export function stayText(e: StablingEntry, now: number): string {
   const a = Date.parse(e.arrived_at);
+  // Ankunft am Überführungsbahnhof unbekannt: höchstens seit der Ankunft am Bahnhof davor
+  if (e.transfer_from && e.departed_at) return `höchstens ${fmtStay(Date.parse(e.departed_at) - a)}`;
   if (e.departed_at) return fmtStay(Date.parse(e.departed_at) - a);
   if (e.seen_again_at) return `höchstens ${fmtStay(Date.parse(e.seen_again_at) - a)}`;
   if (e.state === "open") return `bisher ${fmtStay(now - a)}`;
@@ -195,7 +207,9 @@ export interface ChronicleItem {
 export function chronicle(list: StablingEntry[]): ChronicleItem[] {
   const out: ChronicleItem[] = [];
   for (const entry of list) {
-    out.push({ at: entry.arrived_at, kind: "in", entry });
+    // Überführt: Zeitpunkt unbekannt, deshalb nur die Abfahrt am Überführungsbahnhof
+    if (!entry.transfer_from) out.push({ at: entry.arrived_at, kind: "in", entry });
+    if (entry.transfer_to) continue;
     if (entry.departed_at) out.push({ at: entry.departed_at, kind: "out", entry });
     else if (entry.seen_again_at) out.push({ at: entry.seen_again_at, kind: "seen", entry });
   }

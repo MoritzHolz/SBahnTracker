@@ -37,7 +37,9 @@ async function fetchStyle(url: string, timeoutMs = 4000): Promise<StyleSpecifica
   const ctrl = new AbortController();
   const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: ctrl.signal });
+    // Immer den aktuellen Style holen: Der Browser behält ihn sonst einen Tag, und ein alter
+    // verweist womöglich auf Kacheladressen, die nicht mehr erreichbar sind.
+    const res = await fetch(url, { signal: ctrl.signal, cache: "no-cache" });
     if (!res.ok) return null;
     const json = (await res.json()) as StyleSpecification;
     return json && json.version === 8 && Array.isArray(json.layers) ? json : null;
@@ -47,6 +49,9 @@ async function fetchStyle(url: string, timeoutMs = 4000): Promise<StyleSpecifica
     window.clearTimeout(timer);
   }
 }
+
+/** Quelle der Straßen und Orte in den OpenFreeMap-Styles */
+export const BASE_SOURCE = "openmaptiles";
 
 /** Minimaler dunkler Style ohne Kacheln – letzter Fallback. */
 export function minimalStyle(): StyleSpecification {

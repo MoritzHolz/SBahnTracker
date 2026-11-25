@@ -204,7 +204,8 @@ export function StablingPanel() {
               <h2 className="text-[10px] font-medium uppercase tracking-[0.12em] text-faint">So entsteht das Protokoll</h2>
               <ul className="mt-2 list-disc space-y-1 pl-4">
                 <li>Ein Eintrag entsteht, wenn ein gelesener Zug 45 min nach der Ankunft in keiner gelesenen Abfahrt auftaucht. An der Schwabstraße gilt das nach 15 min und nur für Abfahrten vom Gegengleis.</li>
-                <li>Zeiten stammen aus Fahrplan und Echtzeit. Ankunft heißt: Ende der letzten Fahrt. Wurde die nächste Fahrt an einem anderen Bahnhof gelesen, bleibt die Abfahrt unbekannt.</li>
+                <li>Zeiten stammen aus Fahrplan und Echtzeit. Ankunft heißt: Ende der letzten Fahrt. Wurde die nächste Fahrt an einem anderen Bahnhof gelesen, bleibt die Abfahrt am ersten Bahnhof unbekannt.</li>
+                <li>Fährt ein abgestellter Zug als Nächstes an einem anderen Bahnhof los, gilt er als dorthin überführt und dort abgestellt. Er erscheint dann zweimal: am Bahnhof der Abstellung und am neuen Bahnhof mit der beobachteten Abfahrt, dort markiert mit <span className="mx-0.5 inline-grid h-4 w-4 place-items-center rounded-[4px] align-middle text-[11px] leading-none" style={{ background: `${VIOLET}26`, color: VIOLET }}>↪</span>. Wann und wie er dorthin kam, ist nicht bekannt: Er kann auch auf einer nicht gescannten Fahrt hingefahren sein (Annahme).</li>
                 <li>Eine Abfahrt gilt nur als beobachtet, wenn genug Abfahrten dazwischen gelesen wurden. Verspätete, aber planmäßige Wenden an der Schwabstraße zählen nicht als Abstellung.</li>
                 <li>Nicht im Protokoll: Züge, die nach 48 h (Schwabstraße 60 min) automatisch nach Plochingen verschoben wurden. Dazu zählen auch lange Standzeiten übers Wochenende. Für Plochingen selbst gilt die Regel nicht.</li>
                 <li>Ohne Scans entsteht kein Eintrag. Lücken in der Nacht schließt der Zeitplan im <Link href="/scanner" className="text-fg underline decoration-white/30 underline-offset-2">Scanner</Link>.</li>
@@ -239,6 +240,17 @@ function Empty({ filtered, past }: { filtered: boolean; past: boolean }) {
   );
 }
 
+/** Kleines Symbol: kam von woanders, war dort abgestellt */
+function TransferMark({ e }: { e: StablingEntry }) {
+  if (!e.transfer_from) return null;
+  const t = `Von woanders gekommen: abgestellt in ${e.transfer_from} seit ${fmtDay(e.arrived_at)} ${fmtTime(e.arrived_at)}`;
+  return (
+    <span title={t} aria-label={t} role="img" className="mr-1 inline-grid h-4 w-4 shrink-0 translate-y-[-1px] place-items-center rounded-[4px] align-middle text-[11px] leading-none" style={{ background: `${VIOLET}26`, color: VIOLET }}>
+      ↪
+    </span>
+  );
+}
+
 function Vehicles({ ids }: { ids: string[] }) {
   return (
     <>
@@ -269,6 +281,16 @@ function DepartureText({ e }: { e: StablingEntry }) {
         </span>
       </>
     );
+  if (e.seen_again_at && e.transfer_to)
+    return (
+      <>
+        <span>nach {e.transfer_to} überführt</span>
+        <span className="tnum block text-[12px] text-faint">
+          Zeitpunkt unbekannt, dort ab {other(e.seen_again_at)}
+          {fmtTime(e.seen_again_at)}
+        </span>
+      </>
+    );
   if (e.seen_again_at)
     return (
       <>
@@ -277,6 +299,7 @@ function DepartureText({ e }: { e: StablingEntry }) {
           wieder gesehen {other(e.seen_again_at)}
           {fmtTime(e.seen_again_at)}
           {e.seen_again_station && ` in ${e.seen_again_station}`}
+          {e.next_line_id && ` als ${e.next_line_id} Zug ${e.next_train_number ?? "–"}`}
         </span>
       </>
     );
@@ -286,6 +309,25 @@ function DepartureText({ e }: { e: StablingEntry }) {
     <>
       <span className="text-muted">noch nicht erkannt</span>
       <span className="block text-[12px] text-faint">zu wenige Scans seither</span>
+    </>
+  );
+}
+
+/** Ankunft; am Überführungsbahnhof unbekannt */
+function ArrivalText({ e }: { e: StablingEntry }) {
+  if (e.transfer_from)
+    return (
+      <>
+        <span>aus {e.transfer_from} überführt</span>
+        <span className="tnum block text-[12px] text-faint">
+          Zeit unbekannt, frühestens {fmtTime(e.arrived_at)}
+        </span>
+      </>
+    );
+  return (
+    <>
+      {fmtTime(e.arrived_at)}
+      {e.arr_platform && <span className="block text-[12px] text-faint">Gl. {e.arr_platform}</span>}
     </>
   );
 }
@@ -316,11 +358,9 @@ function StationTables({ list, now, lineStyle }: { list: StablingEntry[]; now: n
               {g.entries.map((e) => (
                 <tr key={entryKey(e)} className="align-top">
                   <td className="tnum whitespace-nowrap px-4 py-2.5">{fmtDay(e.arrived_at)}</td>
-                  <td className="tnum py-2.5 pr-2">
-                    {fmtTime(e.arrived_at)}
-                    {e.arr_platform && <span className="block text-[12px] text-faint">Gl. {e.arr_platform}</span>}
-                  </td>
+                  <td className="tnum py-2.5 pr-2"><ArrivalText e={e} /></td>
                   <td className="py-2.5 pr-2">
+                    <TransferMark e={e} />
                     <Vehicles ids={e.vehicles} />
                     <span className="mt-0.5 flex items-center gap-1.5 text-[12px] text-faint">
                       <LineBadge id={e.line_id} {...lineStyle(e.line_id)} size="sm" />
@@ -338,7 +378,7 @@ function StationTables({ list, now, lineStyle }: { list: StablingEntry[]; now: n
             {g.entries.map((e) => (
               <li key={entryKey(e)} className="px-4 py-3">
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-[15px]"><Vehicles ids={e.vehicles} /></span>
+                  <span className="text-[15px]"><TransferMark e={e} /><Vehicles ids={e.vehicles} /></span>
                   <span className="tnum shrink-0 text-[12.5px] text-muted">{e.cars} Waggons</span>
                 </div>
                 <div className="mt-1 flex items-center gap-1.5 text-[12.5px] text-faint">
@@ -348,7 +388,7 @@ function StationTables({ list, now, lineStyle }: { list: StablingEntry[]; now: n
                 </div>
                 <dl className="mt-1.5 grid grid-cols-[5.5rem_1fr] gap-y-1 text-[13px]">
                   <dt className="text-faint">Abgestellt</dt>
-                  <dd className="tnum">{fmtDay(e.arrived_at)} {fmtTime(e.arrived_at)}</dd>
+                  <dd className="tnum">{e.transfer_from ? <ArrivalText e={e} /> : `${fmtDay(e.arrived_at)} ${fmtTime(e.arrived_at)}`}</dd>
                   <dt className="text-faint">Abfahrt</dt>
                   <dd><DepartureText e={e} /></dd>
                   <dt className="text-faint">Standzeit</dt>
@@ -410,9 +450,12 @@ function Timeline({ list, days, day, setDay, now, today }: { list: StablingEntry
                 <ul className="mt-1 space-y-2">
                   {g.entries.map((e) => {
                     const s = byKey.get(entryKey(e))!;
-                    const known = e.state === "departed";
-                    const start = `${s.before ? `${fmtDay(e.arrived_at)} ` : ""}${fmtTime(e.arrived_at)}`;
-                    const end = e.departed_at
+                    const known = e.state === "departed" && !e.transfer_from;
+                    const at = `${s.before ? `${fmtDay(e.arrived_at)} ` : ""}${fmtTime(e.arrived_at)}`;
+                    const start = e.transfer_from ? `aus ${e.transfer_from} (nach ${at})` : at;
+                    const end = e.transfer_to
+                      ? `nach ${e.transfer_to} überführt`
+                      : e.departed_at
                       ? `${s.after ? `${fmtDay(e.departed_at)} ` : ""}${fmtTime(e.departed_at)}`
                       : e.seen_again_at
                         ? "Abfahrt unbekannt"
@@ -423,7 +466,7 @@ function Timeline({ list, days, day, setDay, now, today }: { list: StablingEntry
                     return (
                       <li key={entryKey(e)} title={label}>
                         <div className="flex items-baseline justify-between gap-3 text-[12px]">
-                          <span className="min-w-0 truncate"><Vehicles ids={e.vehicles} /></span>
+                          <span className="min-w-0 truncate"><TransferMark e={e} /><Vehicles ids={e.vehicles} /></span>
                           <span className="tnum shrink-0 text-muted">
                             {start} – {end}
                           </span>
@@ -454,8 +497,13 @@ function Timeline({ list, days, day, setDay, now, today }: { list: StablingEntry
               <span className="h-2.5 w-5 rounded-[3px]" style={{ background: VIOLET }} /> Ankunft und Abfahrt bekannt
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="h-2.5 w-5" style={{ background: `repeating-linear-gradient(135deg, ${VIOLET} 0 4px, ${VIOLET}59 4px 8px)` }} /> Ende offen oder nicht beobachtet
+              <span className="h-2.5 w-5" style={{ background: `repeating-linear-gradient(135deg, ${VIOLET} 0 4px, ${VIOLET}59 4px 8px)` }} /> Anfang oder Ende offen bzw. nicht beobachtet
             </span>
+            {segs.some((x) => x.entry.transfer_from) && (
+              <span className="flex items-center gap-1.5">
+                <span className="grid h-4 w-4 place-items-center rounded-[4px] text-[11px]" style={{ background: `${VIOLET}26`, color: VIOLET }}>↪</span> von woanders gekommen, war dort abgestellt
+              </span>
+            )}
             {nowAt != null && (
               <span className="flex items-center gap-1.5">
                 <span className="h-3 w-px bg-white/50" /> jetzt
@@ -492,6 +540,7 @@ function Chronicle({ items, lineStyle }: { items: ChronicleItem[]; lineStyle: Li
                     {i.kind === "in" ? "■" : i.kind === "out" ? "→" : "?"}
                   </span>
                   <span className="min-w-0 flex-1">
+                    <TransferMark e={e} />
                     <Vehicles ids={e.vehicles} /> <span className="text-muted">{KIND[i.kind]}</span>{" "}
                     <span>{i.kind === "seen" ? `in ${e.seen_again_station ?? "–"}` : e.station_name}</span>
                     <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px] text-faint">
@@ -504,6 +553,9 @@ function Chronicle({ items, lineStyle }: { items: ChronicleItem[]; lineStyle: Li
                             Zug {(i.kind === "out" ? e.dep_train_number : e.train_number) ?? "–"}
                             {i.kind === "out" ? e.dep_destination && ` nach ${e.dep_destination}` : e.origin_name && ` aus ${e.origin_name}`} · {e.cars} Waggons
                           </span>
+                          {i.kind === "out" && e.transfer_from && (
+                            <span>· vorher aus {e.transfer_from} überführt (abgestellt dort {fmtDay(e.arrived_at)} {fmtTime(e.arrived_at)})</span>
+                          )}
                         </>
                       )}
                     </span>
