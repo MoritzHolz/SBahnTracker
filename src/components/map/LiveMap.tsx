@@ -2,7 +2,7 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Map as MlMap, NavigationControl, type MapMouseEvent } from "maplibre-gl";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { lineColor, type Line, type LiveTrip, type RouteShape } from "@/lib/api";
 import type { LngLat } from "@/lib/geo";
 import {
@@ -13,6 +13,7 @@ import {
   type SmoothState,
   type TrackCache,
 } from "@/lib/position";
+import { FallbackMap } from "./FallbackMap";
 import type { ParkingSite } from "@/lib/parking";
 import { isStaleWebOnly } from "@/lib/scanner";
 import { addAppLayers, MODEL_ZOOM, PARKING_LAYER, setSourceData, SRC_PARKING, SRC_ROUTES, SRC_STATIONS, SRC_TRAINS, TRAIN_LAYERS } from "./layers";
@@ -43,6 +44,15 @@ export interface LiveMapProps {
 
 /** setData-Takt (~12 Hz); die Interpolation bleibt zeitbasiert. */
 const FRAME_MS = 1000 / 12;
+/** So oft wird die Karte nach einem Ausfall der Grafik von selbst neu aufgebaut */
+const MAX_REBUILDS = 3;
+const CONTEXT_RESTORE_MS = 4000;
+/** Danach wird die vereinfachte Karte gezeigt, bis die richtige fertig ist */
+const SLOW_MS = 10_000;
+/** Läuft die Karte so lange ohne Ausfall, zählen frühere Ausfälle nicht mehr */
+const STABLE_MS = 60_000;
+/** Hintergrundkarte nicht erreichbar: einmal später erneut versuchen */
+const BASE_RETRY_MS = 30_000;
 const GEO_BLEND_MS = 2000;
 const TOUCH_RADIUS_PX = 18;
 
@@ -66,6 +76,25 @@ export default function LiveMap(props: LiveMapProps) {
   const headsRef = useRef(new Map<string, LngLat>());
   const [ready, setReady] = useState(false);
   const [styleError, setStyleError] = useState<string | null>(null);
+  /** Zähler für Neuaufbau der Karte */
+  const [build, setBuild] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const [slow, setSlow] = useState(false);
+  const viewRef = useRef<{ center: [number, number]; zoom: number }>({ center: [9.18, 48.78], zoom: 10 });
+  const autoRef = useRef(0);
+  const baseRetried = useRef(false);
+
+  const rebuild = useCallback((auto: boolean) => {
+    if (auto && autoRef.current >= MAX_REBUILDS) {
+      setReady(false);
+      setFailed(true);
+      return;
+    }
+    autoRef.current = auto ? autoRef.current + 1 : 0;
+    setFailed(false);
+    setSlow(false);
+    setBuild((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     propsRef.current = props;
@@ -75,19 +104,37 @@ export default function LiveMap(props: LiveMapProps) {
   useEffect(() => {
     let cancelled = false;
     let raf = 0;
+    let restoreTimer = 0;
+    let stableTimer = 0;
+    let baseTimer = 0;
+    setReady(false);
     configureMaplibre();
+    const slowTimer = window.setTimeout(() => setSlow(true), SLOW_MS);
+    // Nach Ruhezustand oder Grafikfehler kann die Zeichenfläche tot sein
+    const onVisible = () => {
+      const map = mapRef.current;
+      if (document.visibilityState === "hidden" || !map) return;
+      if (map.getCanvas().getContext("webgl2")?.isContextLost()) rebuild(true);
+      else map.triggerRepaint();
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
     (async () => {
       const base = await resolveBaseStyle();
       if (cancelled || !containerRef.current) return;
       propsRef.current.onBaseStyle?.(base.kind);
-      if (base.kind === "minimal") setStyleError("Basiskarte nicht erreichbar – vereinfachte Darstellung");
+      setStyleError(base.kind === "minimal" ? "Basiskarte nicht erreichbar – vereinfachte Darstellung" : null);
+
+      if (base.kind === "minimal" && !baseRetried.current) {
+        baseRetried.current = true;
+        baseTimer = window.setTimeout(() => rebuild(true), BASE_RETRY_MS);
+      }
 
       const map = new MlMap({
         container: containerRef.current,
         style: base.style,
-        center: [9.18, 48.78],
-        zoom: 10,
+        center: viewRef.current.center,
+        zoom: viewRef.current.zoom,
         minZoom: 7,
         maxZoom: 18,
         attributionControl: { compact: true, customAttribution: EXTRA_ATTRIBUTION },
@@ -98,10 +145,27 @@ export default function LiveMap(props: LiveMapProps) {
       map.touchZoomRotate.disableRotation();
       map.addControl(new NavigationControl({ showCompass: false }), "bottom-right");
 
-      map.on("load", () => {
+      map.on("moveend", () => {
+        const c = map.getCenter();
+        viewRef.current = { center: [c.lng, c.lat], zoom: map.getZoom() };
+      });
+      map.on("webglcontextlost", () => {
+        window.clearTimeout(stableTimer);
+        window.clearTimeout(restoreTimer);
+        restoreTimer = window.setTimeout(() => !cancelled && rebuild(true), CONTEXT_RESTORE_MS);
+      });
+      map.on("webglcontextrestored", () => window.clearTimeout(restoreTimer));
+
+      // Nicht auf „load“ warten: das kommt erst, wenn auch alle Kacheln und Schriften da sind
+      map.on("style.load", () => {
         if (cancelled) return;
-        // Handy: Quellenangabe nach einigen Sekunden hinter das (i) einklappen
-        if (window.matchMedia("(max-width: 767px), (max-height: 560px)").matches) {
+        addIcons(map);
+        // Nach einem Grafikfehler stellt MapLibre den Stil samt eigenen Ebenen selbst wieder her
+        if (map.getSource(SRC_TRAINS)) return;
+        window.clearTimeout(slowTimer);
+        setSlow(false);
+        // Handy und kleinere Laptops: Quellenangabe nach einigen Sekunden hinter das (i) einklappen
+        if (window.matchMedia("(max-width: 1700px), (max-height: 560px)").matches) {
           window.setTimeout(() => {
             if (cancelled) return;
             const attrib = map.getContainer().querySelector(".maplibregl-ctrl-attrib");
@@ -109,9 +173,11 @@ export default function LiveMap(props: LiveMapProps) {
             attrib?.removeAttribute("open");
           }, 5000);
         }
-        addIcons(map);
         addAppLayers(map, base.kind);
         setReady(true);
+        stableTimer = window.setTimeout(() => {
+          autoRef.current = 0;
+        }, STABLE_MS);
       });
       // Fehlende Glyphen/Icons des Basisstyles nicht als harten Fehler behandeln
       map.on("styleimagemissing", () => undefined);
@@ -167,15 +233,24 @@ export default function LiveMap(props: LiveMapProps) {
         }
       };
       raf = requestAnimationFrame(frame);
-    })();
+    })().catch((err: unknown) => {
+      // z. B. WebGL abgeschaltet oder vom Browser gesperrt
+      console.error("Karte konnte nicht aufgebaut werden", err);
+      if (!cancelled) setFailed(true);
+    });
 
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
+      window.clearTimeout(slowTimer);
+      window.clearTimeout(restoreTimer);
+      window.clearTimeout(stableTimer);
+      window.clearTimeout(baseTimer);
+      document.removeEventListener("visibilitychange", onVisible);
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, []);
+  }, [build, rebuild]);
 
   /* ------------------------ Züge pro Frame zeichnen ---------------------- */
   function renderTrains(map: MlMap, now: number) {
@@ -349,7 +424,18 @@ export default function LiveMap(props: LiveMapProps) {
     <div className="absolute inset-0">
       {/* Inline-Style, da .maplibregl-map (unlayered CSS) sonst Tailwind-Utilities überschreibt */}
       <div ref={containerRef} style={{ position: "absolute", inset: 0 }} aria-label="Karte der S-Bahn Stuttgart" />
-      {!ready && (
+      {!ready && (failed || slow) && (
+        <FallbackMap
+          {...props}
+          note={
+            failed
+              ? "Dein Browser kann die Karte gerade nicht zeichnen (Grafikbeschleunigung). Meist hilft: Browser ganz beenden und neu öffnen."
+              : "Die Karte lädt ungewöhnlich lange."
+          }
+          onRetry={() => rebuild(false)}
+        />
+      )}
+      {!ready && !failed && !slow && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center">
           <span className="text-xs tracking-wide text-[var(--muted)]">Karte wird geladen …</span>
         </div>

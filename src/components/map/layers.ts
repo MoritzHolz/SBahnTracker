@@ -1,4 +1,5 @@
 import type { ExpressionSpecification, GeoJSONSource, Map as MlMap } from "maplibre-gl";
+import { LOOP_DRAWN, LOOP_SIDING } from "@/lib/schwabLoop";
 import { FONT_BOLD, FONT_REGULAR, type BaseStyleKind } from "./maplibre";
 
 export const SRC_ROUTES = "sb-routes";
@@ -9,6 +10,9 @@ export const SRC_TRAINS = "sb-trains";
 /** Geschätzte Abstellungen */
 export const SRC_PARKING = "sb-parking";
 export const PARKING_LAYER = "sb-parking";
+
+/** Wendeschleife Schwabstraße */
+export const SRC_LOOP = "sb-loop";
 
 export const TRAIN_LAYERS = ["sb-train-body", "sb-train-head", "sb-train-arrow"];
 /** Ab dieser Zoomstufe werden Züge als Modellzug (Linienstück) gezeichnet. */
@@ -47,6 +51,16 @@ export function addAppLayers(map: MlMap, baseKind: BaseStyleKind) {
   }
 
   map.addSource(SRC_ROUTES, { type: "geojson", data: EMPTY });
+  map.addSource(SRC_LOOP, {
+    type: "geojson",
+    data: {
+      type: "FeatureCollection",
+      features: [
+        { type: "Feature", properties: { main: true }, geometry: { type: "LineString", coordinates: LOOP_DRAWN } },
+        { type: "Feature", properties: { main: false }, geometry: { type: "LineString", coordinates: LOOP_SIDING } },
+      ],
+    },
+  });
   map.addSource(SRC_STATIONS, { type: "geojson", data: EMPTY });
   map.addSource(SRC_PARKING, { type: "geojson", data: EMPTY });
   map.addSource(SRC_TRAINS, { type: "geojson", data: EMPTY });
@@ -74,6 +88,36 @@ export function addAppLayers(map: MlMap, baseKind: BaseStyleKind) {
       "line-width": ["interpolate", ["linear"], ["zoom"], 9, 1.1, 14, 2.4],
       "line-opacity": dimmed(0.85, 0.18),
     },
+  });
+
+  // Wendeschleife Schwabstraße (Tunnel, daher gestrichelt)
+  map.addLayer({
+    id: "sb-loop",
+    type: "line",
+    source: SRC_LOOP,
+    minzoom: 11,
+    layout: { "line-cap": "butt", "line-join": "round" },
+    paint: {
+      "line-color": "#c9ced6",
+      "line-width": ["interpolate", ["linear"], ["zoom"], 11, 1, 15, ["case", ["get", "main"], 2.4, 1.6]],
+      "line-dasharray": [3, 1.2],
+      "line-opacity": ["case", ["get", "main"], 0.85, 0.55],
+    },
+  });
+  map.addLayer({
+    id: "sb-loop-label",
+    type: "symbol",
+    source: SRC_LOOP,
+    minzoom: 13.5,
+    filter: ["get", "main"],
+    layout: {
+      "symbol-placement": "line-center",
+      "text-field": "Wendeschleife",
+      "text-font": FONT_REGULAR,
+      "text-size": 11,
+      "text-offset": [0, 1],
+    },
+    paint: { "text-color": "#c9ced6", "text-halo-color": "#0b0d10", "text-halo-width": 1.4 },
   });
 
   // Stationen

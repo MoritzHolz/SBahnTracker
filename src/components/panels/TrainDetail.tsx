@@ -180,7 +180,7 @@ export function TrainDetail({ summary: s, track, lineStyle, scanner, now, follow
         </div>
         {/* Kennzahlen */}
         <dl className="border-b border-line px-5 py-3">
-          <Kv k="Status">{STATUS_LABEL[s.status]}</Kv>
+          <Kv k="Status">{STATUS_LABEL[s.status]}{s.position?.inLoop && " · Wendeschleife (geschätzt)"}</Kv>
           <Kv k="Fahrtrichtung">
             {directionLabel(t.direction)}
             <span className="text-faint"> · nach {t.destination_name ?? "–"}</span>

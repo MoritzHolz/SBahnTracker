@@ -229,4 +229,6 @@ Verschieben ändert nur den geschätzten Ort (`moved_at`, `moved_from_name`), es
 | Frontend & UI/Map | Next.js-App, Karte, Animation, Panels, Tests |
 | QA & Security | unabhängige Prüfung von Code, SQL, Sicherheit, UI |
 
+Wendeschleife Schwabstraße: Gleisverlauf aus OpenStreetMap (ODbL, `src/lib/schwabLoop.ts`). Fahrten, die dort enden oder beginnen, fahren auf der Karte durch die Schleife; die Bewegung ist aus den Fahrplanzeiten geschätzt. Kann der Browser die Karte nicht zeichnen (WebGL fehlt oder ist ausgefallen), erscheint eine vereinfachte SVG-Karte (`FallbackMap.tsx`).
+
 Attribution: Fahrplan/Echtzeit © NVBW / MobiData BW · Karte © OpenFreeMap, © OpenMapTiles, © OpenStreetMap-Mitwirkende.

@@ -12,7 +12,9 @@ import {
   smoothDistance,
   TrackCache,
   trainLengthM,
+  LOOP_WINDOW_MS,
 } from "./position";
+import { LOOP_MAIN, SCHWABSTRASSE_ID } from "./schwabLoop";
 
 /* Test-Fixtures (nur in Tests): drei Halte auf einer West-Ost-Linie. */
 const T0 = Date.parse("2026-11-23T10:00:00Z");
@@ -332,5 +334,57 @@ describe("trainLengthM", () => {
     expect(
       trainLengthM(trip(baseStops(), { formation: { vehicles: ["a", "b", "c"], observed_at: null, station_name: null, source: null } })),
     ).toBe(204);
+  });
+});
+
+describe("Wendeschleife Schwabstraße", () => {
+  const inbound: LngLat = [9.15648, 48.770192];
+  const outbound: LngLat = [9.15655, 48.770088];
+  const schwab = { station_id: SCHWABSTRASSE_ID, lat: 48.77015, station_name: "Schwabstraße" };
+  const at = (track: NonNullable<ReturnType<typeof buildTrack>>, t: LiveTrip, min: number) => {
+    const pos = computeTripPosition(t, track, T0 + min * 60_000);
+    return pos?.dist == null ? null : { ...pos, p: track.line.pointAt(pos.dist) };
+  };
+  const arriving = trip([stop(1, 9.17, null, 0), stop(2, 9.1565, 4, null, schwab)]);
+  const departing = trip([stop(1, 9.1565, null, 13, schwab), stop(2, 9.17, 17, null)]);
+  const inTrack = buildTrack(arriving, { ...shape, coords: [[9.17, 48.78], inbound] })!;
+  const outTrack = buildTrack(departing, { ...shape, coords: [outbound, [9.17, 48.78]] })!;
+
+  it("steht erst am Bahnsteig und fährt dann in die Schleife", () => {
+    expect(haversineM(at(inTrack, arriving, 4.5)!.p, inbound)).toBeLessThan(30);
+    expect(at(inTrack, arriving, 4.5)!.inLoop).toBe(false);
+    const late = at(inTrack, arriving, 8)!;
+    expect(late.inLoop).toBe(true);
+    expect(haversineM(late.p, inbound)).toBeGreaterThan(200);
+  });
+
+  it("kommt vor der Abfahrt aus der Schleife zum Bahnsteig", () => {
+    expect(at(outTrack, departing, 9)!.inLoop).toBe(true);
+    expect(haversineM(at(outTrack, departing, 12)!.p, outbound)).toBeLessThan(30);
+    expect(at(outTrack, departing, 12)!.inLoop).toBe(false);
+  });
+
+  it("übergibt bei 9 min Wende ohne Sprung und ohne doppelten Zug", () => {
+    const t = 4 + LOOP_WINDOW_MS / 60_000;
+    expect(haversineM(at(inTrack, arriving, t - 0.001)!.p, at(outTrack, departing, t + 0.001)!.p)).toBeLessThan(30);
+    expect(at(inTrack, arriving, t + 0.01)).toBeNull();
+    expect(at(outTrack, departing, t - 0.01)).toBeNull();
+  });
+
+  it("Halte liegen trotz vorangestellter Schleife richtig", () => {
+    expect(haversineM(outTrack.line.pointAt(outTrack.stopDist[0]!), outbound)).toBeLessThan(30);
+    expect(haversineM(outTrack.line.pointAt(outTrack.stopDist[1]!), [9.17, 48.78])).toBeLessThan(30);
+  });
+
+  it("durchfahrende Züge bleiben unverändert", () => {
+    const t = trip([stop(1, 9.1, null, 0, { lat: 48.765 }), stop(2, 9.1565, 4, 5, schwab), stop(3, 9.17, 9, null)]);
+    const track = buildTrack(t, { ...shape, coords: [[9.1, 48.765], inbound, [9.17, 48.78]] })!;
+    expect(track.loopIn ?? track.loopOut).toBeUndefined();
+  });
+
+  it("Schleife ist zusammenhängend", () => {
+    const l = new Polyline(LOOP_MAIN).length;
+    expect(l).toBeGreaterThan(1500);
+    expect(l).toBeLessThan(2000);
   });
 });

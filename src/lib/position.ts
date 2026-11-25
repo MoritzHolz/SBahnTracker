@@ -6,9 +6,17 @@
  */
 import type { LiveTrip, RouteShape, TripStop } from "./api";
 import { haversineM, Polyline, type LngLat } from "./geo";
+import { LOOP_IN, LOOP_OUT, SCHWABSTRASSE_ID } from "./schwabLoop";
 
 export const PRE_DEPARTURE_WINDOW_MS = 5 * 60_000;
 export const POST_ARRIVAL_WINDOW_MS = 5 * 60_000;
+/**
+ * Wendeschleife Schwabstraße: Die planmäßige Wende dauert 9 min. Je 4,5 min
+ * gehören zur ankommenden und zur abfahrenden Fahrt, so erscheint der Zug nicht doppelt.
+ */
+export const LOOP_WINDOW_MS = 4.5 * 60_000;
+const LOOP_AFTER_ARRIVAL_MS = 60_000;
+const LOOP_BEFORE_DEPARTURE_MS = 90_000;
 export const DEFAULT_TRAIN_LENGTH_M = 140;
 export const UNIT_LENGTH_M = 68;
 /** Ab diesem mittleren Abstand Halt↔Shape gilt die Shape als unpassend. */
@@ -152,6 +160,9 @@ export interface Track {
   stopDist: (number | null)[];
   /** true = keine/unpassende Shape, Gerade zwischen Halten */
   approximate: boolean;
+  /** Wendeschleife Schwabstraße: angehängte Meter nach dem letzten bzw. vor dem ersten Halt */
+  loopOut?: number;
+  loopIn?: number;
 }
 
 function stopLngLat(s: TripStop): LngLat | null {
@@ -223,6 +234,30 @@ export function trackKey(trip: LiveTrip, shape: RouteShape | null | undefined): 
   return `${trip.id}#${shapeSig}#${stopsSig}`;
 }
 
+/** Hängt die Wendeschleife an, wenn die Fahrt an der Schwabstraße endet oder beginnt. */
+function withLoop(trip: LiveTrip, t: Track): Track {
+  const active = trip.stops.map((s, i) => ({ s, i })).filter((x) => !x.s.cancelled);
+  const first = active[0];
+  const last = active[active.length - 1];
+  const a = t.stopDist[first?.i];
+  const z = t.stopDist[last?.i];
+  if (a == null || z == null) return t;
+  if (last.s.station_id === SCHWABSTRASSE_ID) {
+    const base = t.line.slice(0, z);
+    if (!base) return t;
+    const line = new Polyline([...base, ...LOOP_OUT]);
+    return { ...t, line, loopOut: line.length - z };
+  }
+  if (first.s.station_id === SCHWABSTRASSE_ID) {
+    const rest = t.line.slice(a, t.line.length);
+    if (!rest) return t;
+    const line = new Polyline([...LOOP_IN, ...rest]);
+    const shift = line.length - (t.line.length - a) - a;
+    return { ...t, line, stopDist: t.stopDist.map((d) => (d == null ? null : d + shift)), loopIn: a + shift };
+  }
+  return t;
+}
+
 export function buildTrack(trip: LiveTrip, shape: RouteShape | null | undefined): Track | null {
   const key = trackKey(trip, shape);
   if (shape && shape.coords.length >= 2) {
@@ -241,7 +276,7 @@ export function buildTrack(trip: LiveTrip, shape: RouteShape | null | undefined)
         }
         const { dist, offsets } = projectStops(line, pts);
         if (median(offsets) <= SHAPE_MISFIT_M) {
-          return { key, line, stopDist: dist, approximate: false };
+          return withLoop(trip, { key, line, stopDist: dist, approximate: false });
         }
       }
     }
@@ -332,6 +367,8 @@ export interface TripPosition {
   progress: number;
   /** Position entlang track.line (m) – null, wenn kein Track */
   dist: number | null;
+  /** fährt oder wartet in der Wendeschleife Schwabstraße (geschätzt) */
+  inLoop?: boolean;
 }
 
 /**
@@ -351,11 +388,23 @@ export function computeTripPosition(
   const distOf = (idx: number): number | null => track?.stopDist[idx] ?? null;
 
   if (now < first.dep) {
-    if (first.dep - now > PRE_DEPARTURE_WINDOW_MS) return null;
+    const wait = first.dep - now;
+    if (wait > (track?.loopIn ? LOOP_WINDOW_MS : PRE_DEPARTURE_WINDOW_MS)) return null;
+    const d0 = distOf(first.idx);
+    if (track?.loopIn && d0 != null) {
+      const f = easeTrain((LOOP_WINDOW_MS - wait) / (LOOP_WINDOW_MS - LOOP_BEFORE_DEPARTURE_MS));
+      return { phase: "vor_abfahrt", lastIdx: first.idx, nextIdx: tl[1].idx, progress: 0, dist: d0 - track.loopIn * (1 - f), inLoop: f < 1 };
+    }
     return { phase: "vor_abfahrt", lastIdx: first.idx, nextIdx: tl[1].idx, progress: 0, dist: distOf(first.idx) };
   }
   if (now >= last.arr) {
-    if (now - last.arr > POST_ARRIVAL_WINDOW_MS) return null;
+    const since = now - last.arr;
+    if (since > (track?.loopOut ? LOOP_WINDOW_MS : POST_ARRIVAL_WINDOW_MS)) return null;
+    const dz = distOf(last.idx);
+    if (track?.loopOut && dz != null) {
+      const f = easeTrain((since - LOOP_AFTER_ARRIVAL_MS) / (LOOP_WINDOW_MS - LOOP_AFTER_ARRIVAL_MS));
+      return { phase: "angekommen", lastIdx: last.idx, nextIdx: null, progress: 1, dist: dz + track.loopOut * f, inLoop: f > 0 };
+    }
     return { phase: "angekommen", lastIdx: last.idx, nextIdx: null, progress: 1, dist: distOf(last.idx) };
   }
 

@@ -33,7 +33,7 @@ export interface ResolvedStyle {
   kind: BaseStyleKind;
 }
 
-async function fetchStyle(url: string, timeoutMs = 7000): Promise<StyleSpecification | null> {
+async function fetchStyle(url: string, timeoutMs = 4000): Promise<StyleSpecification | null> {
   const ctrl = new AbortController();
   const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
   try {
