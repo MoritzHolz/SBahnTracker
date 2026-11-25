@@ -1,3 +1,4 @@
+import type { ParkedVehicle } from "./parking";
 import { applyWebDelay, type WebInfo } from "./scanner";
 import { getSupabase } from "./supabase";
 
@@ -188,6 +189,12 @@ export async function fetchSourceStatus(): Promise<SourceStatus | null> {
   const { data, error } = await getSupabase().rpc("get_source_status");
   if (error) throw new Error(`get_source_status: ${error.message}`);
   return asObject<SourceStatus>(data);
+}
+
+export async function fetchParked(): Promise<ParkedVehicle[]> {
+  const { data, error } = await getSupabase().rpc("get_parked_vehicles");
+  if (error) throw new Error(`get_parked_vehicles: ${error.message}`);
+  return asArray<ParkedVehicle>(data);
 }
 
 export async function searchVehicle(query: string): Promise<VehicleSearchResult[]> {

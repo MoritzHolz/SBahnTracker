@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Delay, LineBadge, Platform } from "@/components/ui/Badges";
 import { fmtTime } from "@/lib/time";
 import type { LiveTrip } from "@/lib/api";
+import { parkingLevel, type ParkedVehicle, type ParkingSite } from "@/lib/parking";
 import { looksLikeVehicleNumber, parseTrainNumber, platformInfo, STATUS_LABEL, type TripSummary } from "@/lib/trips";
 
 export type StatusFilter =
@@ -63,6 +64,12 @@ interface SidebarProps {
   loading: boolean;
   /** Fahrten, deren gemeldete Wagenreihung die gesuchte Fahrzeugnummer enthält */
   vehicleHits: { trip: LiveTrip; vehicle: string }[];
+  /** Geschätzte Abstellungen */
+  sites: ParkingSite[];
+  /** abgestellte Fahrzeuge, die zur gesuchten Nummer passen */
+  parkedHits: ParkedVehicle[];
+  selectedSite: string | null;
+  onSelectSite: (id: string) => void;
   /** Scan-Knopf unter der Suche */
   scan?: React.ReactNode;
 }
@@ -79,13 +86,16 @@ const STATUS_DOT: Record<string, string> = {
 
 export function Sidebar(p: SidebarProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [parkedOpen, setParkedOpen] = useState(false);
   const activeFilters =
     (p.filters.dest ? 1 : 0) + (p.filters.station ? 1 : 0) + (p.filters.status !== "alle" ? 1 : 0);
   const vehicleLike = looksLikeVehicleNumber(p.query);
   const train = parseTrainNumber(p.query);
   const searching = p.query.trim() !== "";
   // Viele Fahrzeugtreffer: alles unter dem Suchfeld scrollt gemeinsam. Sonst scrollt auf dem Desktop nur die Zugliste.
-  const scrollAll = p.vehicleHits.length > 0;
+  const scrollAll = p.vehicleHits.length > 0 || p.parkedHits.length > 0 || parkedOpen;
+  const parkedCount = p.sites.reduce((n, s) => n + s.parked.length, 0);
+  const absentCount = p.sites.reduce((n, s) => n + s.absent.length, 0);
   const body = useRef<HTMLDivElement>(null);
   useEffect(() => {
     body.current?.scrollTo({ top: 0 });
@@ -152,6 +162,27 @@ export function Sidebar(p: SidebarProps) {
                   </li>
                 );
               })}
+            </ul>
+          )}
+          {p.parkedHits.length > 0 && (
+            <ul className={`space-y-1 ${p.vehicleHits.length > 0 ? "mt-1" : ""}`}>
+              {p.parkedHits.map((v) => (
+                <li key={v.vehicle_id}>
+                  <button
+                    onClick={() => p.onSelectSite(v.station_id ?? v.station_name ?? "")}
+                    className="flex w-full items-center gap-2 rounded-md border border-[#c4a7ff]/30 bg-[#c4a7ff]/[0.06] px-2.5 py-1.5 text-left text-[12px] compact:min-h-11 compact:text-[13px] hover:border-[#c4a7ff]/60"
+                  >
+                    <ParkingMark />
+                    <span className="min-w-0 flex-1 truncate">
+                      Fahrzeug <span className="tnum font-medium">{v.vehicle_id}</span>
+                      <span className="text-muted">
+                        {" "}
+                        · {v.status === "absent" ? `zuletzt ${v.station_name ?? "–"} (Ort unsicher)` : `${parkingLevel(v)} in ${v.station_name ?? "–"}`}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
             </ul>
           )}
           {(vehicleLike || train) && (
@@ -264,6 +295,60 @@ export function Sidebar(p: SidebarProps) {
           )}
         </div>
 
+        {/* Abstellungen */}
+        <div className={`px-4 pt-3 ${searching ? "compact:hidden" : ""}`}>
+          <button
+            onClick={() => setParkedOpen((v) => !v)}
+            className="flex w-full items-center justify-between text-[10px] font-medium uppercase tracking-[0.12em] text-faint hover:text-muted compact:min-h-11 compact:text-[12px]"
+            aria-expanded={parkedOpen}
+          >
+            <span>
+              Abgestellt (geschätzt)
+              {(parkedCount > 0 || absentCount > 0) && (
+                <span className="tnum ml-1 rounded bg-[#c4a7ff]/15 px-1 text-[#c4a7ff]">
+                  {parkedCount}
+                  {absentCount > 0 && ` + ${absentCount}?`}
+                </span>
+              )}
+            </span>
+            <span className={`transition-transform ${parkedOpen ? "rotate-180" : ""}`}>▾</span>
+          </button>
+          {parkedOpen && (
+            <div className="anim-in mt-1.5">
+              {p.sites.length === 0 ? (
+                <p className="text-[12px] leading-relaxed text-faint">
+                  Gerade keine Abstellung schätzbar. Dafür müssen die Züge nach der Ankunft gescannt worden sein.
+                </p>
+              ) : (
+                <ul className="space-y-1">
+                  {p.sites.map((s) => (
+                    <li key={s.id}>
+                      <button
+                        onClick={() => p.onSelectSite(s.id)}
+                        className={`flex w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-[12px] compact:min-h-11 compact:text-[13px] hover:border-[#c4a7ff]/60 ${
+                          s.id === p.selectedSite ? "border-[#c4a7ff]/60 bg-[#c4a7ff]/[0.06]" : "border-line"
+                        }`}
+                      >
+                        <ParkingMark />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate">{s.name}</span>
+                          <span className="tnum block truncate text-[11px] text-faint compact:text-[12px]">
+                            {[...s.parked, ...s.absent].map((v) => v.vehicle_id).join(", ")}
+                          </span>
+                        </span>
+                        <span className="tnum shrink-0 text-right text-[11px] text-muted compact:text-[12px]">
+                          {s.parked.length > 0 && <span className="block text-[#c4a7ff]">{s.parked.length} vermutlich</span>}
+                          {s.absent.length > 0 && <span className="block text-faint">{s.absent.length} unsicher</span>}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Zugliste */}
         <div className="mt-3 flex items-baseline justify-between border-t border-line px-4 pb-1.5 pt-2.5">
           <h2 className="text-[10px] font-medium uppercase tracking-[0.12em] text-faint">Züge</h2>
@@ -290,6 +375,14 @@ export function Sidebar(p: SidebarProps) {
         </ul>
       </div>
     </div>
+  );
+}
+
+function ParkingMark() {
+  return (
+    <span aria-hidden className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded-[3px] bg-[#c4a7ff] text-[11px] font-bold text-[#17131f]">
+      A
+    </span>
   );
 }
 

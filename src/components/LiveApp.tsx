@@ -6,9 +6,11 @@ import { sheetHeightCss, TOP_BAR_PX, useBottomSheet } from "@/hooks/useBottomShe
 import { useLiveData, useNow } from "@/hooks/useLiveData";
 import { useScannerStatus } from "@/hooks/useScanner";
 import { FALLBACK_LINE_COLOR, lineColor, lineTextColor } from "@/lib/api";
+import { groupBySite, parkedMatching } from "@/lib/parking";
 import { TrackCache } from "@/lib/position";
 import { fmtRelative } from "@/lib/time";
 import { summarizeTrip, tripMatchesQuery, tripsWithVehicle, type TripStatus, type TripSummary } from "@/lib/trips";
+import { ParkedPanel } from "./panels/ParkedPanel";
 import { ScanNowButton } from "./panels/ScanNowButton";
 import { Sidebar, type Filters, type LineInfo } from "./panels/Sidebar";
 import { AppNav, Banner, isStale, ScannerBadge, SourceStatusBadge } from "./panels/StatusBar";
@@ -60,6 +62,7 @@ export default function LiveApp() {
   const [focusLine, setFocusLine] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>({ dest: "", station: "", status: "alle" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedSite, setSelectedSite] = useState<string | null>(null);
   const [follow, setFollow] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const list = useBottomSheet("peek", LIST_PEEK_PX);
@@ -74,6 +77,7 @@ export default function LiveApp() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setSelectedId(null);
+        setSelectedSite(null);
         setFollow(false);
       }
     };
@@ -153,9 +157,13 @@ export default function LiveApp() {
 
   const vehicleHits = useMemo(() => tripsWithVehicle(data.trips, query), [data.trips, query]);
 
+  const sites = useMemo(() => groupBySite(data.parked), [data.parked]);
+  const parkedHits = useMemo(() => parkedMatching(data.parked, query), [data.parked, query]);
+
   const matchIds = useMemo(() => (filterActive ? new Set(matching.map((s) => s.trip.id)) : null), [filterActive, matching]);
 
   const selected = selectedId ? summaries.find((s) => s.trip.id === selectedId) ?? null : null;
+  const site = !selected && selectedSite ? sites.find((s) => s.id === selectedSite) ?? null : null;
   const selectedTrack = selected
     ? trackCache.get(selected.trip, selected.trip.shape_id != null ? data.shapes.get(selected.trip.shape_id) : null)
     : null;
@@ -163,7 +171,13 @@ export default function LiveApp() {
 
   const select = useCallback((id: string | null) => {
     setSelectedId(id);
+    setSelectedSite(null);
     if (!id) setFollow(false);
+  }, []);
+  const selectSite = useCallback((id: string | null) => {
+    setSelectedSite(id);
+    setSelectedId(null);
+    setFollow(false);
   }, []);
 
   const toggleLine = useCallback((id: string) => {
@@ -179,7 +193,7 @@ export default function LiveApp() {
   const stale = isStale(data.status, now);
 
   // Von Panels verdeckte Kartenränder
-  const hasSelection = selected != null;
+  const hasSelection = selected != null || site != null;
   const [isMobile, setIsMobile] = useState(false);
   const [isWide, setIsWide] = useState(true);
   const [viewportH, setViewportH] = useState(800);
@@ -210,8 +224,8 @@ export default function LiveApp() {
   }, [isMobile, isWide, viewportH, hasSelection, list.snap, detail.snap, collapsed]);
 
   // Kartenhinweise (Quellenangabe) über dem Blatt; bei ganz geöffnetem Blatt verdeckt es ohnehin die Karte
-  const active = selected ? detail : list;
-  const mapBottom = sheetHeightCss(active.snap === "full" ? "half" : active.snap, selected ? DETAIL_PEEK_PX : LIST_PEEK_PX);
+  const active = hasSelection ? detail : list;
+  const mapBottom = sheetHeightCss(active.snap === "full" ? "half" : active.snap, hasSelection ? DETAIL_PEEK_PX : LIST_PEEK_PX);
 
   return (
     <main className="fixed inset-0 overflow-hidden overscroll-none bg-bg text-fg" style={{ ["--map-bottom" as string]: mapBottom }}>
@@ -227,6 +241,9 @@ export default function LiveApp() {
         selectedId={selectedId}
         follow={follow}
         onSelect={select}
+        sites={sites}
+        selectedSite={site?.id ?? null}
+        onSelectSite={selectSite}
         onFollowChange={setFollow}
         padding={padding}
       />
@@ -261,7 +278,7 @@ export default function LiveApp() {
 
       {/* Datenquellenstatus */}
       <div
-        className={`absolute right-[max(0.75rem,env(safe-area-inset-right))] top-3 z-20 hidden flex-col items-end gap-1.5 transition-[right] duration-200 md:flex ${selected ? "md:right-[424px]" : ""}`}
+        className={`absolute right-[max(0.75rem,env(safe-area-inset-right))] top-3 z-20 hidden flex-col items-end gap-1.5 transition-[right] duration-200 md:flex ${hasSelection ? "md:right-[424px]" : ""}`}
       >
         <SourceStatusBadge status={data.status} tripCount={onMapCount} fetchedAt={data.fetchedAt} error={data.error} now={now} />
         <ScannerBadge status={scanner} now={now} />
@@ -344,35 +361,50 @@ export default function LiveApp() {
             lineStyle={lineStyle}
             loading={data.loading}
             vehicleHits={vehicleHits}
+            sites={sites}
+            parkedHits={parkedHits}
+            selectedSite={site?.id ?? null}
+            onSelectSite={selectSite}
             scan={<ScanNowButton status={scanner} apply={applyScanner} now={now} onFinished={data.refresh} />}
           />
         </div>
       </aside>
 
       {/* Rechtes Detailpanel / Sheet */}
-      {selected && (
+      {(selected || site) && (
         <aside
-          key={selected.trip.id}
+          key={selected?.trip.id ?? site?.id}
           ref={detail.sheetRef}
           style={{ ["--sheet-h" as string]: detail.height }}
           className={`anim-in absolute inset-x-0 bottom-0 z-30 h-[var(--sheet-h)] overflow-hidden rounded-t-xl border border-line bg-[var(--panel)] backdrop-blur-md md:inset-x-auto md:bottom-3 md:right-[max(0.75rem,env(safe-area-inset-right))] md:top-3 md:h-auto md:w-[400px] md:rounded-lg ${
             detail.dragging ? "" : "transition-[height] duration-200"
           }`}
         >
-          <TrainDetail
-            key={selected.trip.id}
-            summary={selected}
-            track={selectedTrack}
-            lineStyle={lineStyle(selected.trip.line_id)}
-            scanner={scanner}
-            now={now}
-            follow={follow}
-            onFollow={setFollow}
-            onClose={() => select(null)}
-            onReported={data.refresh}
-            handleProps={detail.handleProps}
-            onHandleTap={detail.toggle}
-          />
+          {selected ? (
+            <TrainDetail
+              key={selected.trip.id}
+              summary={selected}
+              track={selectedTrack}
+              lineStyle={lineStyle(selected.trip.line_id)}
+              scanner={scanner}
+              now={now}
+              follow={follow}
+              onFollow={setFollow}
+              onClose={() => select(null)}
+              onReported={data.refresh}
+              handleProps={detail.handleProps}
+              onHandleTap={detail.toggle}
+            />
+          ) : site ? (
+            <ParkedPanel
+              site={site}
+              lineStyle={lineStyle}
+              now={now}
+              onClose={() => selectSite(null)}
+              handleProps={detail.handleProps}
+              onHandleTap={detail.toggle}
+            />
+          ) : null}
         </aside>
       )}
     </main>

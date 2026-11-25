@@ -152,6 +152,25 @@ function drawHead(ctx: CanvasRenderingContext2D, s: number) {
   ctx.fill();
 }
 
+/** Abstellung: violettes Kästchen mit „A“ (Farbe der Kennzeichnung „Vermutung“). */
+function parkingIcon(): ImageData | null {
+  const s = 36;
+  const c = document.createElement("canvas");
+  c.width = c.height = s;
+  const ctx = c.getContext("2d");
+  if (!ctx) return null;
+  ctx.fillStyle = "#0b0d10";
+  ctx.fillRect(0, 0, s, s);
+  ctx.fillStyle = "#c4a7ff";
+  ctx.fillRect(3, 3, s - 6, s - 6);
+  ctx.fillStyle = "#17131f";
+  ctx.font = "bold 24px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("A", s / 2, s / 2 + 1);
+  return ctx.getImageData(0, 0, s, s);
+}
+
 export function addIcons(map: MlMap) {
   const icons: [string, (ctx: CanvasRenderingContext2D, s: number) => void, number][] = [
     ["train-arrow", drawArrow, 56],
@@ -161,5 +180,10 @@ export function addIcons(map: MlMap) {
     if (map.hasImage(id)) continue;
     const img = sdfFromDrawing(size, draw);
     if (img) map.addImage(id, img, { sdf: true, pixelRatio: 2 });
+  }
+  // Eigener Name: „parking“ gibt es schon im Sprite der Basiskarte
+  if (!map.hasImage("sb-stabling")) {
+    const img = parkingIcon();
+    if (img) map.addImage("sb-stabling", img, { pixelRatio: 2 });
   }
 }

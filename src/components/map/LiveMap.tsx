@@ -13,8 +13,9 @@ import {
   type SmoothState,
   type TrackCache,
 } from "@/lib/position";
+import type { ParkingSite } from "@/lib/parking";
 import { isStaleWebOnly } from "@/lib/scanner";
-import { addAppLayers, MODEL_ZOOM, setSourceData, SRC_ROUTES, SRC_STATIONS, SRC_TRAINS, TRAIN_LAYERS } from "./layers";
+import { addAppLayers, MODEL_ZOOM, PARKING_LAYER, setSourceData, SRC_PARKING, SRC_ROUTES, SRC_STATIONS, SRC_TRAINS, TRAIN_LAYERS } from "./layers";
 import { addIcons, configureMaplibre, EXTRA_ATTRIBUTION, resolveBaseStyle, type BaseStyleKind } from "./maplibre";
 
 export interface LiveMapProps {
@@ -30,6 +31,10 @@ export interface LiveMapProps {
   selectedId: string | null;
   follow: boolean;
   onSelect: (id: string | null) => void;
+  /** Geschätzte Abstellungen */
+  sites: ParkingSite[];
+  selectedSite: string | null;
+  onSelectSite: (id: string) => void;
   onFollowChange: (follow: boolean) => void;
   onBaseStyle?: (kind: BaseStyleKind) => void;
   /** Von Panels verdeckte Ränder (px), damit Zentrierung im sichtbaren Bereich erfolgt */
@@ -127,12 +132,18 @@ export default function LiveMap(props: LiveMapProps) {
           const d = Math.hypot(p.x - x, p.y - y);
           if (!best || d < best.d) best = { id, d };
         }
-        if (best) propsRef.current.onSelect(best.id);
+        if (best) {
+          propsRef.current.onSelect(best.id);
+          return;
+        }
+        // Züge haben Vorrang vor Abstellungen
+        const site = map.queryRenderedFeatures([[x - r, y - r], [x + r, y + r]], { layers: [PARKING_LAYER] })[0]?.properties?.id;
+        if (typeof site === "string") propsRef.current.onSelectSite(site);
       });
-      map.on("mouseenter", TRAIN_LAYERS, () => {
+      map.on("mouseenter", [...TRAIN_LAYERS, PARKING_LAYER], () => {
         map.getCanvas().style.cursor = "pointer";
       });
-      map.on("mouseleave", TRAIN_LAYERS, () => {
+      map.on("mouseleave", [...TRAIN_LAYERS, PARKING_LAYER], () => {
         map.getCanvas().style.cursor = "";
       });
       map.on("dragstart", () => {
@@ -279,6 +290,28 @@ export default function LiveMap(props: LiveMapProps) {
     setSourceData(map, SRC_STATIONS, { type: "FeatureCollection", features: [...byId.values()] });
   }, [ready, trips, hiddenLines]);
 
+  /* --------------------------- Abstellungen ------------------------------ */
+  const { sites, selectedSite } = props;
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    setSourceData(map, SRC_PARKING, {
+      type: "FeatureCollection",
+      features: sites.flatMap((s): GeoJSON.Feature[] => {
+        if (s.lat == null || s.lon == null) return [];
+        const n = s.parked.length || s.absent.length;
+        const count = s.parked.length ? `${n}` : `${n}?`;
+        return [
+          {
+            type: "Feature",
+            properties: { id: s.id, count, label: `${s.name}: ${n} ${s.parked.length ? "abgestellt" : "unsicher"}`, sure: s.parked.length > 0, sel: s.id === selectedSite },
+            geometry: { type: "Point", coordinates: [s.lon, s.lat] },
+          },
+        ];
+      }),
+    });
+  }, [ready, sites, selectedSite]);
+
   /* ------------------------ Sichtbarer Bereich -------------------------- */
   const { top, bottom, left, right } = props.padding;
   useEffect(() => {
@@ -286,6 +319,14 @@ export default function LiveMap(props: LiveMapProps) {
     if (!map || !ready) return;
     map.easeTo({ padding: { top, bottom, left, right }, duration: 250 });
   }, [ready, top, bottom, left, right]);
+
+  /* Zur Abstellung fliegen – nach der Anpassung der Ränder, die den Flug sonst abbricht */
+  useEffect(() => {
+    const map = mapRef.current;
+    const s = propsRef.current.sites.find((x) => x.id === selectedSite);
+    if (!map || !ready || s?.lat == null || s.lon == null) return;
+    map.flyTo({ center: [s.lon, s.lat], zoom: Math.max(map.getZoom(), 14), padding: propsRef.current.padding, speed: 1.4, essential: true });
+  }, [ready, selectedSite]);
 
   /* ------------------- Hinfliegen bei neuer Auswahl ---------------------- */
   useEffect(() => {

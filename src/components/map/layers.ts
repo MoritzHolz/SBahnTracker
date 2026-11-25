@@ -6,6 +6,10 @@ export const SRC_STATIONS = "sb-stations";
 /** Eine Quelle für alle Züge (Körper als LineString, Kopf als Point) → ein setData pro Tick */
 export const SRC_TRAINS = "sb-trains";
 
+/** Geschätzte Abstellungen */
+export const SRC_PARKING = "sb-parking";
+export const PARKING_LAYER = "sb-parking";
+
 export const TRAIN_LAYERS = ["sb-train-body", "sb-train-head", "sb-train-arrow"];
 /** Ab dieser Zoomstufe werden Züge als Modellzug (Linienstück) gezeichnet. */
 export const MODEL_ZOOM = 13;
@@ -44,6 +48,7 @@ export function addAppLayers(map: MlMap, baseKind: BaseStyleKind) {
 
   map.addSource(SRC_ROUTES, { type: "geojson", data: EMPTY });
   map.addSource(SRC_STATIONS, { type: "geojson", data: EMPTY });
+  map.addSource(SRC_PARKING, { type: "geojson", data: EMPTY });
   map.addSource(SRC_TRAINS, { type: "geojson", data: EMPTY });
 
   // Strecken: leichter Glow + dünne Linie
@@ -102,6 +107,34 @@ export function addAppLayers(map: MlMap, baseKind: BaseStyleKind) {
       "text-color": "#aeb4bd",
       "text-halo-color": "#0b0d10",
       "text-halo-width": 1.4,
+    },
+  });
+
+  // Abstellungen: „A“ mit Anzahl; blass, wenn der Ort nur unsicher ist. Liegt unter den Zügen.
+  map.addLayer({
+    id: PARKING_LAYER,
+    type: "symbol",
+    source: SRC_PARKING,
+    minzoom: 8.5,
+    layout: {
+      "icon-image": "sb-stabling",
+      "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.8, 14, 1.15],
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
+      "text-field": ["step", ["zoom"], ["get", "count"], 12, ["get", "label"]],
+      "text-font": FONT_BOLD,
+      "text-size": 11,
+      "text-offset": [1.2, 0],
+      "text-max-width": 20,
+      "text-anchor": "left",
+      "text-optional": true,
+    },
+    paint: {
+      "icon-opacity": ["case", ["get", "sel"], 1, ["get", "sure"], 0.95, 0.6],
+      "text-color": "#c4a7ff",
+      "text-halo-color": "#0b0d10",
+      "text-halo-width": 1.6,
+      "text-opacity": ["case", ["get", "sel"], 1, ["get", "sure"], 1, 0.75],
     },
   });
 
