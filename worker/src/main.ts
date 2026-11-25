@@ -3,6 +3,7 @@
 import { chromium, type Browser } from "playwright";
 import { hostname } from "node:os";
 import { randomUUID } from "node:crypto";
+import { KeepAwake, SleepDetector, sleepReason } from "./awake.ts";
 import { rpc, type Control, type Page } from "./control.ts";
 import { inWindow, toBoardRecord, type BoardRecord } from "./parse.ts";
 import { isAllowed, loadRobots } from "./robots.ts";
@@ -11,11 +12,15 @@ import { BahnExpertBoard, readDbfBoard, SiteBlocked } from "./sites.ts";
 const WORKER_ID = `${hostname().split(".")[0]}-${randomUUID().slice(0, 8)}`;
 const IDLE_POLL_MS = 5_000;
 const SCAN_POLL_MS = 2_000;
-/** Reicht auch, wenn bei allen Zügen die Wagenreihung fehlt (bis 12 s je Zug) */
-const SCAN_TIMEOUT_MS = 8 * 60_000;
+/** Ein kompletter Scan aller fahrenden Züge (rund 45) dauert etwa 4 min */
+const SCAN_TIMEOUT_MS = 12 * 60_000;
+/** Danach wird keine weitere Wagenreihung begonnen; der Rest folgt beim nächsten Scan */
+const FORMATION_BUDGET_MS = 10 * 60_000;
 /** So lange darf der Schalter während eines Scans unerreichbar sein. Danach wird abgebrochen. */
 const CONTROL_LOST_MS = 20_000;
-const MAX_FORMATIONS = 25;
+/** So lange muss der Takt (2 s) ausbleiben, damit das als Ruhezustand gilt */
+const SLEEP_GAP_MS = 20_000;
+const MAX_FORMATIONS = 70;
 const MIN_GAP_MS = 4_000;
 /** Nur diese Seiten dürfen gelesen werden, auch wenn die Konfiguration etwas anderes enthält. */
 const ALLOWED_HOSTS: Record<Page["kind"], string> = { board: "dbf.finalrewind.org", formation: "bahn.expert" };
@@ -34,6 +39,7 @@ const sleep = (ms: number, signal?: AbortSignal) =>
   });
 
 class Aborted extends Error {}
+const keepAwake = new KeepAwake();
 let stopping = false;
 const stopCtl = new AbortController();
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
@@ -74,7 +80,14 @@ async function scan(runId: number, control: Control): Promise<void> {
   // Herzschlag: überwacht den Schalter während des Scans
   let lastOk = Date.now();
   let beating = false;
+  const sleepDetector = new SleepDetector(SLEEP_GAP_MS);
+  const checkSleep = () => {
+    const gap = sleepDetector.tick();
+    if (gap > 0) cancel(sleepReason(gap));
+  };
   const beat = async () => {
+    // zuerst prüfen: nach dem Aufwachen sind auch alle anderen Zeitlimits abgelaufen
+    checkSleep();
     if (beating) return;
     beating = true;
     try {
@@ -88,16 +101,22 @@ async function scan(runId: number, control: Control): Promise<void> {
     }
   };
   const beatTimer = setInterval(beat, SCAN_POLL_MS);
-  const timeout = setTimeout(() => cancel("Zeitüberschreitung (8 min)"), SCAN_TIMEOUT_MS);
+  const timeout = setTimeout(() => {
+    checkSleep();
+    cancel("Zeitüberschreitung (12 min)");
+  }, SCAN_TIMEOUT_MS);
   // Abbruch schließt den Browser; laufende Playwright-Aufrufe enden dadurch sofort
   abort.signal.addEventListener("abort", () => void browser?.close().catch(() => {}));
   const check = () => {
+    checkSleep();
     if (abort.signal.aborted) throw new Aborted(reason);
   };
 
   const problems: string[] = [];
   let boardsOk = 0;
   const planned = new Map<string, string>();
+  const lineOf = new Map<string, string>();
+  const startedAt = Date.now();
 
   const visit = async (page: Page, ua: string) => {
     const target = new URL(page.url);
@@ -145,7 +164,10 @@ async function scan(runId: number, control: Control): Promise<void> {
         });
         if (!res.ok) throw new Aborted("Scanner wurde ausgeschaltet");
         if (res.skipped > 0) problems.push(`${page.label}: ${res.skipped} Datensätze nicht verwertbar`);
-        for (const r of records) planned.set(r.train_number, (r.dep_planned ?? r.arr_planned)!);
+        for (const r of records) {
+          planned.set(r.train_number, (r.dep_planned ?? r.arr_planned)!);
+          if (r.line) lineOf.set(r.train_number, r.line);
+        }
         boardsOk++;
         log(`Lauf ${runId}: ${page.label}: ${rows.length} Zeilen, ${res.captured} S-Bahnen (${res.new} neu, ${res.updated} aktualisiert)`);
       } catch (e) {
@@ -159,19 +181,26 @@ async function scan(runId: number, control: Control): Promise<void> {
       for (const page of pages.filter((p) => p.kind === "formation")) {
         let board: BahnExpertBoard | null = null;
         try {
-          // Seite nur öffnen, wenn überhaupt noch Wagenreihungen fehlen
+          // Seite nur öffnen, wenn überhaupt noch Wagenreihungen fehlen.
+          // Die Datenbank liefert die Reihenfolge: S1, S2, S3, danach die übrigen Linien
           let targets = await rpc<string[] | null>("scanner_worker_formation_targets", { p_run_id: runId, p_trains: [...planned.keys()], p_limit: MAX_FORMATIONS });
           if (targets === null) throw new Aborted("Scanner wurde ausgeschaltet");
           if (targets.length === 0) continue;
           await visit(page, ua);
           board = await BahnExpertBoard.open(ctx, page.url);
           const visible = new Set(await board.trainNumbers());
+          const unlisted = targets.filter((t) => !visible.has(t));
+          if (unlisted.length) log(`Lauf ${runId}: nicht auf ${new URL(page.url).host} gelistet: ${unlisted.map((t) => `${lineOf.get(t) ?? "?"} ${t}`).join(", ")}`);
           targets = targets.filter((t) => visible.has(t));
           let found = 0;
           let failed = 0;
           for (const [i, no] of targets.entries()) {
             check();
-            step = `Wagenreihung S ${no} (${i + 1}/${targets.length})`;
+            if (Date.now() - startedAt > FORMATION_BUDGET_MS) {
+              problems.push(`Zeit reichte nicht: ${targets.length - i} Züge folgen beim nächsten Scan`);
+              break;
+            }
+            step = `${lineOf.get(no) ?? "S-Bahn"}: Wagenreihung S ${no} (${i + 1}/${targets.length})`;
             try {
               const units = await board.readFormation(no);
               check();
@@ -205,6 +234,7 @@ async function scan(runId: number, control: Control): Promise<void> {
     const status = boardsOk === 0 ? "error" : problems.length ? "partial" : "ok";
     await finish(runId, status, problems.length ? problems.join(" | ") : null);
   } catch (e) {
+    checkSleep();
     const aborted = e instanceof Aborted || abort.signal.aborted;
     const isTimeout = aborted && reason.startsWith("Zeit");
     await finish(runId, aborted && !isTimeout ? "aborted" : "error", aborted ? reason : shortError(e));
@@ -241,7 +271,13 @@ while (!stopping) {
       const runId = await rpc<number | null>("scanner_worker_start", { p_worker_id: WORKER_ID, p_trigger: c.due });
       if (runId !== null) {
         log(`Lauf ${runId} gestartet (${c.due})`);
-        await scan(runId, c);
+        // Nur für die Dauer des Scans. Dauerhaft wach hält ausschließlich der Schalter (worker/mac.sh wach ein)
+        keepAwake.hold(true);
+        try {
+          await scan(runId, c);
+        } finally {
+          keepAwake.hold(false);
+        }
       }
     }
   } catch (e) {

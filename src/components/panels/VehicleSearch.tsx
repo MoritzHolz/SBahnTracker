@@ -156,7 +156,7 @@ export function VehicleSearch() {
               <Link href="/" className="mt-2 inline-block text-[12px] text-accent hover:underline">
                 Zur Karte
               </Link>
-              <p className="mt-1">Dieses Fahrzeug wurde noch nicht erfasst. Je Scan werden die Fahrzeuge von bis zu 25 Zügen gelesen, die rund um die Scanzeit am Hbf (tief) fahren. Scanne noch einmal oder melde es über einen Zug auf der Karte.</p>
+              <p className="mt-1">Dieses Fahrzeug wurde noch nicht erfasst. Je Scan werden die Fahrzeuge der Züge gelesen, die gerade über den Hbf (tief) unterwegs sind, S1 bis S3 zuerst. Scanne noch einmal oder melde es über einen Zug auf der Karte.</p>
             </div>
           )}
           {state.kind === "done" && state.results.map((r) => <VehicleProfile key={r.vehicle.id} r={r} now={now} lineStyle={lineStyle} />)}

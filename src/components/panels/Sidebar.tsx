@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Delay, LineBadge, Platform } from "@/components/ui/Badges";
 import { fmtTime } from "@/lib/time";
 import type { LiveTrip } from "@/lib/api";
@@ -84,11 +84,17 @@ export function Sidebar(p: SidebarProps) {
   const vehicleLike = looksLikeVehicleNumber(p.query);
   const train = parseTrainNumber(p.query);
   const searching = p.query.trim() !== "";
+  // Viele Fahrzeugtreffer: alles unter dem Suchfeld scrollt gemeinsam. Sonst scrollt auf dem Desktop nur die Zugliste.
+  const scrollAll = p.vehicleHits.length > 0;
+  const body = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    body.current?.scrollTo({ top: 0 });
+  }, [p.query]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col compact:block compact:overflow-y-auto compact:overscroll-contain">
-      {/* Suche */}
-      <div className="px-4 pt-3">
+    <div className="flex h-full min-h-0 flex-col">
+      {/* Suche bleibt beim Scrollen stehen */}
+      <div className="shrink-0 px-4 pb-2 pt-3">
         <label className="relative block">
           <span className="sr-only">Suche</span>
           <svg className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" viewBox="0 0 16 16" fill="none">
@@ -114,167 +120,175 @@ export function Sidebar(p: SidebarProps) {
             </button>
           )}
         </label>
-        {p.vehicleHits.length > 0 && (
-          <ul className="mt-2 space-y-1">
-            {p.vehicleHits.map(({ trip, vehicle }) => {
-              const ls = p.lineStyle(trip.line_id);
-              return (
-                <li key={trip.id}>
-                  <button
-                    onClick={() => p.onSelect(trip.id)}
-                    className="flex w-full items-center gap-2 rounded-md border border-accent/30 bg-accent/[0.06] px-2.5 py-1.5 text-left text-[12px] compact:min-h-11 compact:text-[13px] hover:border-accent/60"
-                  >
-                    <LineBadge id={trip.line_id} color={ls.color} textColor={ls.textColor} size="sm" />
-                    <span className="min-w-0 flex-1 truncate">
-                      Fahrzeug <span className="tnum font-medium">{vehicle}</span>
-                      <span className="text-muted">
-                        {" "}
-                        · {trip.line_id} Zug {trip.train_number ?? "–"} → {trip.destination_name ?? "–"}
-                      </span>
-                    </span>
-                    <span aria-hidden className="text-faint">
-                      ⌖
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {(vehicleLike || train) && (
-          <Link
-            href={`/fahrzeuge?q=${encodeURIComponent(train ?? p.query.trim())}`}
-            className="mt-2 flex items-center justify-between rounded-md border border-line px-2.5 py-1.5 text-[12px] text-muted hover:border-[var(--line-strong)] hover:text-fg compact:min-h-11 compact:text-[13px]"
-          >
-            <span>
-              {train ? `Alle Fahrten von Zug ${train}` : `Fahrzeug „${p.query.trim()}“`} in der Fahrzeugsuche öffnen
-            </span>
-            <span aria-hidden>→</span>
-          </Link>
-        )}
       </div>
 
-      {/* Beim Suchen auf dem Handy rücken die Treffer direkt unter das Suchfeld */}
-      {p.scan && <div className={`px-4 pt-2 ${searching ? "compact:hidden" : ""}`}>{p.scan}</div>}
-
-      {/* Linien-Chips */}
-      <div className={`px-4 pt-3 ${searching ? "compact:hidden" : ""}`}>
-        <div className="mb-1.5 flex items-baseline justify-between">
-          <h2 className="text-[10px] font-medium uppercase tracking-[0.12em] text-faint">Linien</h2>
-          {p.focusLine && (
-            <button onClick={() => p.onFocusLine(null)} className="text-[11px] text-muted hover:text-fg compact:-my-3 compact:py-3 compact:text-[13px]">
-              Hervorhebung aufheben
-            </button>
+      <div
+        ref={body}
+        className={`scroll-thin min-h-0 flex-1 overscroll-contain compact:block compact:overflow-y-auto ${scrollAll ? "overflow-y-auto" : "flex flex-col"}`}
+      >
+        <div className="px-4">
+          {p.vehicleHits.length > 0 && (
+            <ul className="space-y-1">
+              {p.vehicleHits.map(({ trip, vehicle }) => {
+                const ls = p.lineStyle(trip.line_id);
+                return (
+                  <li key={trip.id}>
+                    <button
+                      onClick={() => p.onSelect(trip.id)}
+                      className="flex w-full items-center gap-2 rounded-md border border-accent/30 bg-accent/[0.06] px-2.5 py-1.5 text-left text-[12px] compact:min-h-11 compact:text-[13px] hover:border-accent/60"
+                    >
+                      <LineBadge id={trip.line_id} color={ls.color} textColor={ls.textColor} size="sm" />
+                      <span className="min-w-0 flex-1 truncate">
+                        Fahrzeug <span className="tnum font-medium">{vehicle}</span>
+                        <span className="text-muted">
+                          {" "}
+                          · {trip.line_id} Zug {trip.train_number ?? "–"} → {trip.destination_name ?? "–"}
+                        </span>
+                      </span>
+                      <span aria-hidden className="text-faint">
+                        ⌖
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {(vehicleLike || train) && (
+            <Link
+              href={`/fahrzeuge?q=${encodeURIComponent(train ?? p.query.trim())}`}
+              className={`${scrollAll ? "mt-2 " : ""}flex items-center justify-between rounded-md border border-line px-2.5 py-1.5 text-[12px] text-muted hover:border-[var(--line-strong)] hover:text-fg compact:min-h-11 compact:text-[13px]`}
+            >
+              <span>
+                {train ? `Alle Fahrten von Zug ${train}` : `Fahrzeug „${p.query.trim()}“`} in der Fahrzeugsuche öffnen
+              </span>
+              <span aria-hidden>→</span>
+            </Link>
           )}
         </div>
-        <div className="flex flex-wrap gap-1.5">
-          {p.lines.length === 0 && <span className="text-[12px] text-faint">{p.loading ? "Lädt …" : "Keine Linien"}</span>}
-          {p.lines.map((l) => {
-            const hidden = p.hiddenLines.has(l.id);
-            const focused = p.focusLine === l.id;
-            return (
-              <div
-                key={l.id}
-                className={`group flex h-7 compact:h-10 items-stretch overflow-hidden rounded-md border text-[12px] transition-colors ${
-                  focused ? "border-[var(--line-strong)] bg-white/[0.06]" : "border-line"
-                } ${hidden ? "opacity-45" : ""}`}
-              >
-                <button
-                  onClick={() => p.onToggleLine(l.id)}
-                  title={hidden ? `${l.id} einblenden` : `${l.id} ausblenden`}
-                  aria-pressed={!hidden}
-                  className="grid w-6 compact:w-10 place-items-center hover:bg-white/5"
-                  aria-label={hidden ? `${l.id} einblenden` : `${l.id} ausblenden`}
-                >
-                  <span
-                    className="h-2.5 w-2.5 rounded-full border-2"
-                    style={{ borderColor: l.color, background: hidden ? "transparent" : l.color }}
-                  />
-                </button>
-                <button
-                  onClick={() => p.onFocusLine(focused ? null : l.id)}
-                  disabled={hidden}
-                  title={`${l.id} hervorheben`}
-                  className="flex items-center gap-1.5 border-l border-line pl-1.5 pr-2 compact:px-2.5 compact:text-[13px] font-semibold hover:bg-white/5 disabled:cursor-not-allowed"
-                >
-                  {l.id}
-                  <span className="tnum font-normal text-faint">{l.count}</span>
-                </button>
-              </div>
-            );
-          })}
-        </div>
-        <p className="mt-1.5 text-[10.5px] text-faint">Punkt: ein-/ausblenden · Name: hervorheben</p>
-      </div>
 
-      {/* Filter */}
-      <div className="px-4 pt-3">
-        <button
-          onClick={() => setFiltersOpen((v) => !v)}
-          className="flex w-full items-center justify-between text-[10px] font-medium uppercase tracking-[0.12em] text-faint hover:text-muted compact:min-h-11 compact:text-[12px]"
-          aria-expanded={filtersOpen}
-        >
-          <span>
-            Filter {activeFilters > 0 && <span className="ml-1 rounded bg-accent/15 px-1 text-accent">{activeFilters}</span>}
-          </span>
-          <span className={`transition-transform ${filtersOpen ? "rotate-180" : ""}`}>▾</span>
-        </button>
-        {filtersOpen && (
-          <div className="anim-in mt-2 grid grid-cols-1 gap-2">
-            <Select
-              label="Richtung / Ziel"
-              value={p.filters.dest}
-              onChange={(v) => p.onFilters({ ...p.filters, dest: v })}
-              options={[["", "Alle Ziele"], ...p.destinations.map((d) => [d, d] as [string, string])]}
-            />
-            <Select
-              label="Station"
-              value={p.filters.station}
-              onChange={(v) => p.onFilters({ ...p.filters, station: v })}
-              options={[["", "Alle Stationen"], ...p.stations.map((d) => [d, d] as [string, string])]}
-            />
-            <Select
-              label="Status"
-              value={p.filters.status}
-              onChange={(v) => p.onFilters({ ...p.filters, status: v as StatusFilter })}
-              options={Object.entries(STATUS_FILTER_LABEL) as [string, string][]}
-            />
-            {activeFilters > 0 && (
-              <button
-                onClick={() => p.onFilters({ dest: "", station: "", status: "alle" })}
-                className="justify-self-start text-[11px] text-muted hover:text-fg compact:min-h-11 compact:text-[13px]"
-              >
-                Filter zurücksetzen
+        {/* Beim Suchen auf dem Handy rücken die Treffer direkt unter das Suchfeld */}
+        {p.scan && <div className={`px-4 ${scrollAll || vehicleLike || train ? "pt-2" : ""} ${searching ? "compact:hidden" : ""}`}>{p.scan}</div>}
+
+        {/* Linien-Chips */}
+        <div className={`px-4 pt-3 ${searching ? "compact:hidden" : ""}`}>
+          <div className="mb-1.5 flex items-baseline justify-between">
+            <h2 className="text-[10px] font-medium uppercase tracking-[0.12em] text-faint">Linien</h2>
+            {p.focusLine && (
+              <button onClick={() => p.onFocusLine(null)} className="text-[11px] text-muted hover:text-fg compact:-my-3 compact:py-3 compact:text-[13px]">
+                Hervorhebung aufheben
               </button>
             )}
           </div>
-        )}
-      </div>
+          <div className="flex flex-wrap gap-1.5">
+            {p.lines.length === 0 && <span className="text-[12px] text-faint">{p.loading ? "Lädt …" : "Keine Linien"}</span>}
+            {p.lines.map((l) => {
+              const hidden = p.hiddenLines.has(l.id);
+              const focused = p.focusLine === l.id;
+              return (
+                <div
+                  key={l.id}
+                  className={`group flex h-7 compact:h-10 items-stretch overflow-hidden rounded-md border text-[12px] transition-colors ${
+                    focused ? "border-[var(--line-strong)] bg-white/[0.06]" : "border-line"
+                  } ${hidden ? "opacity-45" : ""}`}
+                >
+                  <button
+                    onClick={() => p.onToggleLine(l.id)}
+                    title={hidden ? `${l.id} einblenden` : `${l.id} ausblenden`}
+                    aria-pressed={!hidden}
+                    className="grid w-6 compact:w-10 place-items-center hover:bg-white/5"
+                    aria-label={hidden ? `${l.id} einblenden` : `${l.id} ausblenden`}
+                  >
+                    <span
+                      className="h-2.5 w-2.5 rounded-full border-2"
+                      style={{ borderColor: l.color, background: hidden ? "transparent" : l.color }}
+                    />
+                  </button>
+                  <button
+                    onClick={() => p.onFocusLine(focused ? null : l.id)}
+                    disabled={hidden}
+                    title={`${l.id} hervorheben`}
+                    className="flex items-center gap-1.5 border-l border-line pl-1.5 pr-2 compact:px-2.5 compact:text-[13px] font-semibold hover:bg-white/5 disabled:cursor-not-allowed"
+                  >
+                    {l.id}
+                    <span className="tnum font-normal text-faint">{l.count}</span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-1.5 text-[10.5px] text-faint">Punkt: ein-/ausblenden · Name: hervorheben</p>
+        </div>
 
-      {/* Zugliste */}
-      <div className="mt-3 flex items-baseline justify-between border-t border-line px-4 pb-1.5 pt-2.5">
-        <h2 className="text-[10px] font-medium uppercase tracking-[0.12em] text-faint">Züge</h2>
-        <span className="tnum text-[11px] text-faint">
-          {p.items.length} / {p.totalCount}
-        </span>
+        {/* Filter */}
+        <div className="px-4 pt-3">
+          <button
+            onClick={() => setFiltersOpen((v) => !v)}
+            className="flex w-full items-center justify-between text-[10px] font-medium uppercase tracking-[0.12em] text-faint hover:text-muted compact:min-h-11 compact:text-[12px]"
+            aria-expanded={filtersOpen}
+          >
+            <span>
+              Filter {activeFilters > 0 && <span className="ml-1 rounded bg-accent/15 px-1 text-accent">{activeFilters}</span>}
+            </span>
+            <span className={`transition-transform ${filtersOpen ? "rotate-180" : ""}`}>▾</span>
+          </button>
+          {filtersOpen && (
+            <div className="anim-in mt-2 grid grid-cols-1 gap-2">
+              <Select
+                label="Richtung / Ziel"
+                value={p.filters.dest}
+                onChange={(v) => p.onFilters({ ...p.filters, dest: v })}
+                options={[["", "Alle Ziele"], ...p.destinations.map((d) => [d, d] as [string, string])]}
+              />
+              <Select
+                label="Station"
+                value={p.filters.station}
+                onChange={(v) => p.onFilters({ ...p.filters, station: v })}
+                options={[["", "Alle Stationen"], ...p.stations.map((d) => [d, d] as [string, string])]}
+              />
+              <Select
+                label="Status"
+                value={p.filters.status}
+                onChange={(v) => p.onFilters({ ...p.filters, status: v as StatusFilter })}
+                options={Object.entries(STATUS_FILTER_LABEL) as [string, string][]}
+              />
+              {activeFilters > 0 && (
+                <button
+                  onClick={() => p.onFilters({ dest: "", station: "", status: "alle" })}
+                  className="justify-self-start text-[11px] text-muted hover:text-fg compact:min-h-11 compact:text-[13px]"
+                >
+                  Filter zurücksetzen
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Zugliste */}
+        <div className="mt-3 flex items-baseline justify-between border-t border-line px-4 pb-1.5 pt-2.5">
+          <h2 className="text-[10px] font-medium uppercase tracking-[0.12em] text-faint">Züge</h2>
+          <span className="tnum text-[11px] text-faint">
+            {p.items.length} / {p.totalCount}
+          </span>
+        </div>
+        <ul className={`sheet-b ${scrollAll ? "" : "scroll-thin min-h-0 flex-1 overflow-y-auto compact:overflow-visible"}`}>
+          {p.loading && p.items.length === 0 && <li className="px-4 py-6 text-[12px] text-faint">Lade Fahrten …</li>}
+          {!p.loading && p.items.length === 0 && (
+            <li className="px-4 py-6 text-[12px] leading-relaxed text-faint">
+              Keine Fahrten für die aktuelle Auswahl. Filter oder Suche anpassen.
+            </li>
+          )}
+          {p.items.map((s) => (
+            <TrainRow
+              key={s.trip.id}
+              s={s}
+              selected={s.trip.id === p.selectedId}
+              onSelect={p.onSelect}
+              lineStyle={p.lineStyle(s.trip.line_id)}
+            />
+          ))}
+        </ul>
       </div>
-      <ul className="scroll-thin sheet-b min-h-0 flex-1 overflow-y-auto compact:overflow-visible">
-        {p.loading && p.items.length === 0 && <li className="px-4 py-6 text-[12px] text-faint">Lade Fahrten …</li>}
-        {!p.loading && p.items.length === 0 && (
-          <li className="px-4 py-6 text-[12px] leading-relaxed text-faint">
-            Keine Fahrten für die aktuelle Auswahl. Filter oder Suche anpassen.
-          </li>
-        )}
-        {p.items.map((s) => (
-          <TrainRow
-            key={s.trip.id}
-            s={s}
-            selected={s.trip.id === p.selectedId}
-            onSelect={p.onSelect}
-            lineStyle={p.lineStyle(s.trip.line_id)}
-          />
-        ))}
-      </ul>
     </div>
   );
 }

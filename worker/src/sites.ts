@@ -58,7 +58,13 @@ export class BahnExpertBoard {
   static async open(ctx: BrowserContext, url: string): Promise<BahnExpertBoard> {
     // Reguläre Anzeige-Einstellungen der Seite (Menü → Einstellungen): EVN, Fahrzeuggruppe, Fahrtnummer anzeigen
     await ctx.addCookies(
-      ["showEVN", "fahrzeugGruppe", "lineAndNumber"].map((name) => ({ name, value: "true", url: new URL(url).origin })),
+      [
+        ["showEVN", "true"],
+        ["fahrzeugGruppe", "true"],
+        ["lineAndNumber", "true"],
+        // Vergangene Abfahrten (Minuten): sonst fehlen Züge, die den Hauptbahnhof schon verlassen haben, aber noch fahren
+        ["lookbehind", "90"],
+      ].map(([name, value]) => ({ name, value, url: new URL(url).origin })),
     );
     const page = await ctx.newPage();
     await open(page, url);

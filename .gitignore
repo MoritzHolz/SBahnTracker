@@ -43,3 +43,6 @@ next-env.d.ts
 
 # per Script kopiert
 /public/maplibre/
+
+# gebaut mit worker/mac.sh wach app
+/Mac wach halten.app/
