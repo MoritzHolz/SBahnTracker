@@ -177,7 +177,7 @@ export function Sidebar(p: SidebarProps) {
                       Fahrzeug <span className="tnum font-medium">{v.vehicle_id}</span>
                       <span className="text-muted">
                         {" "}
-                        · {v.status === "absent" ? `zuletzt ${v.station_name ?? "–"} (Ort unsicher)` : `${parkingLevel(v)} in ${v.station_name ?? "–"}`}
+                        · {v.status === "moved_depot" ? `nach ${v.station_name} verschoben (Annahme)` : v.status === "absent" ? `zuletzt ${v.station_name ?? "–"} (Ort unsicher)` : `${parkingLevel(v)} in ${v.station_name ?? "–"}`}
                       </span>
                     </span>
                   </button>
@@ -333,18 +333,22 @@ export function Sidebar(p: SidebarProps) {
                         <span className="min-w-0 flex-1">
                           <span className="block truncate">{s.name}</span>
                           <span className="tnum block truncate text-[11px] text-faint compact:text-[12px]">
-                            {[...s.parked, ...s.absent].map((v) => v.vehicle_id).join(", ")}
+                            {[...s.parked, ...s.absent, ...s.moved].map((v) => v.vehicle_id).join(", ")}
                           </span>
                         </span>
                         <span className="tnum shrink-0 text-right text-[11px] text-muted compact:text-[12px]">
                           {s.parked.length > 0 && <span className="block text-[#c4a7ff]">{s.parked.length} vermutlich</span>}
                           {s.absent.length > 0 && <span className="block text-faint">{s.absent.length} unsicher</span>}
+                          {s.moved.length > 0 && <span className="block text-faint">{s.moved.length} verschoben</span>}
                         </span>
                       </button>
                     </li>
                   ))}
                 </ul>
               )}
+              <Link href="/abstellungen" className="mt-2 inline-flex items-center text-[12px] text-muted underline decoration-white/20 underline-offset-2 hover:text-fg compact:min-h-11">
+                Abstellprotokoll der Woche
+              </Link>
             </div>
           )}
         </div>

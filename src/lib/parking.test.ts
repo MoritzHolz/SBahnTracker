@@ -38,6 +38,16 @@ describe("Abstellungen", () => {
     expect(parkedMatching(list, "Backnang 430")).toEqual([]);
   });
 
+  it("führt verschobene Fahrzeuge getrennt und nie als abgestellt", () => {
+    const [p] = groupBySite([
+      v({ vehicle_id: "430 001", station_id: "p", station_name: "Plochingen", status: "moved_depot", moved_at: "2026-11-25T10:00:00Z", confidence: 0.1 }),
+      v({ vehicle_id: "430 002", station_id: "p", station_name: "Plochingen" }),
+    ]);
+    expect(p.parked.map((x) => x.vehicle_id)).toEqual(["430 002"]);
+    expect(p.moved.map((x) => x.vehicle_id)).toEqual(["430 001"]);
+    expect(parkingLevel(p.moved[0])).toBe("verschoben");
+  });
+
   it("übersetzt Status", () => {
     expect(vehicleStatusLabel("absent")).toBe("nicht im Einsatz, Ort unsicher");
     expect(vehicleStatusLabel(null)).toBe("unbekannt");

@@ -100,6 +100,8 @@ Das Collector-Secret liegt in `private.app_config` (nicht über die API lesbar) 
 | `vehicle_sightings` | Fahrtenbuch (aus `formations` per Trigger) |
 | `split_events` | mögliche Trennung/Vereinigung/Umstellung mit Konfidenz |
 | `stabling_sites` | Lage der Abstellgleise je Endstation (OpenStreetMap) |
+| `stabling_rules` | Mindeststandzeit und Frist bis zum Verschieben je Bahnhof (`*` = alle) |
+| `stabling_events` | Abstellprotokoll je Fahrzeug, eindeutig über (Fahrzeug, Betriebstag, Linie, Zugnummer) |
 | `parking_estimates` | vermuteter Abstellort/Status mit Konfidenz und Begründung |
 | `collector_runs` | Protokoll jedes Sammellaufs |
 
@@ -114,6 +116,7 @@ Geschrieben wird über `security definer`-Funktionen mit `service_role`, über T
 | `get_live_trips(p_now?)` | aktive Fahrten (±10 min) inkl. Halte und letzter Wagenreihung |
 | `get_route_shapes()` | alle Geometrien `[[lon,lat],…]` |
 | `get_source_status()` | letzter Sammellauf, letzter Erfolg, Status Wagenreihungsquelle |
+| `get_stabling_log(p_from, p_to, p_weekdays_only)` | Abstellprotokoll, je Zug zusammengefasst, mit Abfahrt und Zustand |
 | `search_vehicle(p_query)` | Fahrzeugprofil, Sichtungen, Trennungen, Abstellort |
 | `get_parked_vehicles()` | geschätzt abgestellte Fahrzeuge mit Ort, Ankunftszug und Sicherheit |
 | `scanner_schedule(p_enabled, p_windows, p_keep_awake)` | Zeitplan des Webscanners speichern, nur angemeldet |
@@ -151,25 +154,48 @@ Mit synthetischen Daten getestet: 8 → 4 Fahrzeuge an einer anderen Station erg
 
 ## Abstellort-Erkennung
 
-`private.update_parking_estimates()` läuft alle 5 min und prüft je Fahrzeug die letzte gelesene Fahrt. Kommt es nach der Ankunft in keiner gelesenen Abfahrt mehr vor, gilt es als abgestellt. In den gesammelten Daten starten Rückfahrten 3 bis 27 min nach der Ankunft am selben Bahnhof, deshalb die Wartezeit von 40 min.
+`private.update_parking_estimates()` läuft alle 5 min und prüft je Fahrzeug die letzte gelesene Fahrt. Kommt es nach der Ankunft in keiner gelesenen Abfahrt mehr vor, gilt es als abgestellt. In den gesammelten Daten starten Rückfahrten meist 3 bis 27 min nach der Ankunft am selben Bahnhof, deshalb die Wartezeit von 45 min (längster beobachteter Wert: 40 min).
 
 | Lage | Status | Anzeige |
 |---|---|---|
 | Fahrt läuft noch | `in_service` | im Einsatz |
-| Ankunft vor weniger als 40 min | `turning` | wendet |
+| Ankunft vor weniger als 45 min | `turning` | wendet |
 | Keine Rückfahrt, Sicherheit ≥ 0,75 | `parked_assumed` | „wahrscheinlich hier“ |
 | Keine Rückfahrt, Sicherheit 0,5 bis 0,75 | `parked_assumed` | „vermutlich hier“ |
 | Sicherheit < 0,5, aber mindestens 85 % der letzten Fahrten gelesen | `absent` | „nicht im Einsatz, Ort unsicher“ |
+| Länger als 48 h an einer Endstation (Schwabstraße 60 min), Fehlen belegt | `moved_depot` | Plochingen, „verschoben (Annahme)“ |
 | Zu wenig gelesen, oder seit 4 Tagen nicht gesehen | `unknown` | nicht angezeigt |
 
 Sicherheit = 0,9 · s1 · (0,35 + 0,65 · s2):
-- s1: Anteil der gelesenen Abfahrten am Ankunftsbahnhof in den ersten 40 min (0,85, wenn dort keine fuhr).
+- s1: Anteil der gelesenen Abfahrten am Ankunftsbahnhof in den ersten 45 min (0,85, wenn dort keine fuhr).
 - s2: Anteil der gelesenen Abfahrten danach (1, wenn es keine gab).
 - Halbiert, wenn der Fahrplanabruf länger als 15 min ausfällt.
 
 Grenzen: Die Schätzung ist nur so gut wie die Scans. Leerfahrten und nicht gelesene Züge sind unsichtbar. Die Lage der Abstellgleise stammt aus OpenStreetMap (`stabling_sites`); ob genau diese Gleise genutzt werden, ist nicht bestätigt. Wo keine bekannt sind (z. B. Filderstadt, Flughafen), steht das Zeichen am Bahnhof.
 
 Karte: violettes „A“ mit Anzahl („3?“ = nur unsichere Fahrzeuge), Antippen öffnet die Fahrzeugliste. Seitenleiste: „Abgestellt (geschätzt)“.
+
+### Regeln (`stabling_rules`)
+
+| Bahnhof | Standzeit ab | Verschieben nach |
+|---|---|---|
+| alle übrigen | 45 min | 48 h |
+| Schwabstraße (Wendeschleife) | 15 min | 60 min |
+| Plochingen | 45 min | nie |
+
+Schwabstraße: Züge kommen auf Gleis 1 an und fahren nach der Schleife von Gleis 2 ab. Gezählt werden deshalb nur Abfahrten vom Gegengleis, und alle in den ersten 15 min müssen gelesen sein. Spätabends dauert die planmäßige Wende 24 min und zählt nach der 15-min-Regel als Standzeit.
+
+Verschieben ändert nur den geschätzten Ort (`moved_at`, `moved_from_name`), es entsteht keine Fahrt. Wird das Fahrzeug wieder gelesen, gilt die neue Fahrt.
+
+### Abstellprotokoll (`stabling_events`, Seite `/abstellungen`)
+
+- Beginn: Standzeit erreicht und Sicherheit ≥ 0,5. Wurde das Fahrzeug danach an einem anderen Bahnhof gelesen, ≥ 0,75.
+- Ende: nächste gelesene Fahrt ab demselben Bahnhof (`departed_at`). Sonst bleibt die Abfahrt leer, nur `seen_again_at` ist gesetzt.
+- Ein Eintrag bleibt bei Datenlücken bestehen. Er wird nur verworfen (`discarded_at`), wenn später gelesene Daten ihn widerlegen.
+- Wiederholte Läufe aktualisieren denselben Eintrag (eindeutiger Schlüssel).
+- Per Regel verschobene Fahrzeuge (`moved_at`) fehlen in der Ausgabe, nur ihre Anzahl wird gezeigt.
+- Waggons: gelesene Wagennummern je Einheit, sonst 4.
+- Aufzeichnung ab `private.app_config.stabling_log_from`. Zeitraum der Wochenübersicht: `LOG_FROM`/`LOG_TO` in `src/lib/stabling.ts`.
 
 ## Kosten
 

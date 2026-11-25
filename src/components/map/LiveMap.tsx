@@ -299,12 +299,12 @@ export default function LiveMap(props: LiveMapProps) {
       type: "FeatureCollection",
       features: sites.flatMap((s): GeoJSON.Feature[] => {
         if (s.lat == null || s.lon == null) return [];
-        const n = s.parked.length || s.absent.length;
+        const n = s.parked.length || s.absent.length + s.moved.length;
         const count = s.parked.length ? `${n}` : `${n}?`;
         return [
           {
             type: "Feature",
-            properties: { id: s.id, count, label: `${s.name}: ${n} ${s.parked.length ? "abgestellt" : "unsicher"}`, sure: s.parked.length > 0, sel: s.id === selectedSite },
+            properties: { id: s.id, count, label: `${s.name}: ${n} ${s.parked.length ? "abgestellt" : s.absent.length ? "unsicher" : "verschoben"}`, sure: s.parked.length > 0, sel: s.id === selectedSite },
             geometry: { type: "Point", coordinates: [s.lon, s.lat] },
           },
         ];
