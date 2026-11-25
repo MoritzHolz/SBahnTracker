@@ -4,7 +4,7 @@ import Link from "next/link";
 import { signOut } from "@/components/LoginGate";
 import type { SourceStatus } from "@/lib/api";
 import type { ScannerStatus } from "@/lib/scanner";
-import { fmtRelative, fmtTimeSec } from "@/lib/time";
+import { fmtRelative, fmtTime, fmtTimeSec } from "@/lib/time";
 
 export const STALE_AFTER_MS = 10 * 60_000;
 
@@ -22,7 +22,9 @@ export function ScannerBadge({ status, now }: { status: ScannerStatus | null; no
     status.scan_state === "running"
       ? "Scan läuft"
       : !status.enabled
-        ? "AUS"
+        ? status.schedule.enabled && status.schedule.next_start
+          ? `AUS · Zeitplan ab ${fmtTime(status.schedule.next_start)}`
+          : "AUS"
         : status.scan_state === "error"
           ? status.worker_online ? "Fehler" : "Worker offline"
           : `EIN · Scan ${status.last_success_at ? fmtRelative(status.last_success_at, now) : "steht aus"}`;

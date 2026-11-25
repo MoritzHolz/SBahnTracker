@@ -26,7 +26,7 @@ Das ist eine technische Einschätzung, keine Rechtsberatung. Vor einer öffentli
 | GitHub Actions | verzögerte Starts, 6-h-Grenze, Dauerbetrieb in der Grauzone der Nutzungsbedingungen |
 | **Eigener Worker (Mac, Docker)** | gewählt |
 
-Der Mac-Worker arbeitet nur, solange der Mac wach ist. Während eines Scans hält der Worker ihn selbst wach (`caffeinate`), sonst nur der Schalter „Mac wach halten“ (siehe Einrichten). Zugeklappter Deckel und leerer Akku lassen sich nicht überstimmen. Schläft der Mac, startet ein von unterwegs angeforderter Scan erst nach dem Aufwachen und verfällt nach 5 min. Ein Raspberry Pi Pico reicht nicht als Server, weil darauf kein Chromium läuft; nötig ist ein Raspberry Pi 4/5 oder ein PC. Für Betrieb rund um die Uhr das Docker-Image auf einem Server laufen lassen.
+Der Mac-Worker arbeitet nur, solange der Mac wach ist. Während eines Scans hält der Worker ihn selbst wach (`caffeinate`), sonst nur der Schalter „Mac wach halten“ (siehe Einrichten) und, falls angehakt, der Zeitplan. Zugeklappter Deckel und leerer Akku lassen sich nicht überstimmen. Schläft der Mac, startet ein von unterwegs angeforderter Scan erst nach dem Aufwachen und verfällt nach 5 min. Ein Raspberry Pi Pico reicht nicht als Server, weil darauf kein Chromium läuft; nötig ist ein Raspberry Pi 4/5 oder ein PC. Für Betrieb rund um die Uhr das Docker-Image auf einem Server laufen lassen.
 
 ## So wirkt der Schalter
 
@@ -34,6 +34,12 @@ Der Mac-Worker arbeitet nur, solange der Mac wach ist. Während eines Scans häl
 - **EIN:** Der nächste Abruf startet Chromium und scannt, danach im Intervall (5–60 min, Standard 10).
 - **AUS:** Die Datenbank setzt den laufenden Scan sofort auf „abgebrochen“. Der Worker schließt Chromium innerhalb weniger Sekunden. Daten eines abgebrochenen Laufs nimmt die Datenbank nicht mehr an, auch nicht von einem hängenden Worker. Bereits übernommene Züge bleiben.
 - **Jetzt scannen:** einmaliger Scan, auch bei AUS. Der Schalter bleibt, wie er ist. Mindestabstand 60 s.
+- **Zeitplan** (Standard: aus): schaltet den Scanner zu festen Uhrzeiten (täglich, deutsche Zeit, bis zu 6 Zeitfenster) ein und wieder aus.
+  - Der Worker wendet ihn bei jeder Abfrage an. Zu Beginn muss er laufen und der Mac wach sein. Wacht der Mac erst mitten im Zeitfenster auf, beginnt der Betrieb dann; nach dem Ende wird nichts nachgeholt.
+  - Ausgeschaltet wird nur, was der Zeitplan selbst eingeschaltet hat. Ein laufender Scan darf am Ende fertig werden.
+  - Der Schalter von Hand hat Vorrang: AUS gilt bis zum nächsten Zeitfenster, EIN bleibt über das Ende hinaus.
+  - „Mac während des Zeitfensters wach halten“: Der Worker hält den Mac bis zum Ende des Zeitfensters wach (`caffeinate`), auch ohne Netz. Zugeklappter Deckel und leerer Akku gehen vor.
+  - Vorschlag für die Abstellungen: 04:45–09:30 und 20:30–01:15 Uhr.
 - Der Schalter betrifft nur den Webscanner. Der EFA-Abruf (pg_cron `collect-efa`) läuft weiter.
 
 ## Fehlerfälle

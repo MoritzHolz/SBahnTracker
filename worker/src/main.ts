@@ -262,21 +262,24 @@ async function finish(runId: number, status: string, error: string | null): Prom
 
 log(`Webscanner-Worker ${WORKER_ID} bereit. Wartet auf den Schalter.`);
 let lastMsg = "";
+/** Wach halten laut Zeitplan; endet auch ohne Verbindung zur Steuerung */
+let awakeUntil = 0;
 while (!stopping) {
   try {
     const c = await rpc<Control>("scanner_worker_poll", { p_worker_id: WORKER_ID });
     const msg = !c.ok ? "Ein anderer Worker ist aktiv." : c.enabled ? "Scanner EIN" : "Scanner AUS";
     if (msg !== lastMsg) log((lastMsg = msg));
+    awakeUntil = c.ok && c.keep_awake_until ? Date.parse(c.keep_awake_until) : 0;
     if (c.ok && c.due) {
       const runId = await rpc<number | null>("scanner_worker_start", { p_worker_id: WORKER_ID, p_trigger: c.due });
       if (runId !== null) {
         log(`Lauf ${runId} gestartet (${c.due})`);
-        // Nur für die Dauer des Scans. Dauerhaft wach hält ausschließlich der Schalter (worker/mac.sh wach ein)
+        // Für die Dauer des Scans. Länger wach halten nur der Schalter (worker/mac.sh wach ein) und der Zeitplan
         keepAwake.hold(true);
         try {
           await scan(runId, c);
         } finally {
-          keepAwake.hold(false);
+          keepAwake.hold(Date.now() < awakeUntil);
         }
       }
     }
@@ -284,7 +287,9 @@ while (!stopping) {
     const msg = `Steuerung nicht erreichbar: ${shortError(e)}`;
     if (msg !== lastMsg) log((lastMsg = msg));
   }
+  keepAwake.hold(Date.now() < awakeUntil);
   await sleep(IDLE_POLL_MS, stopCtl.signal);
 }
+keepAwake.hold(false);
 log("Worker beendet.");
 process.stdin.destroy();

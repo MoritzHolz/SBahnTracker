@@ -116,6 +116,7 @@ Geschrieben wird über `security definer`-Funktionen mit `service_role`, über T
 | `get_source_status()` | letzter Sammellauf, letzter Erfolg, Status Wagenreihungsquelle |
 | `search_vehicle(p_query)` | Fahrzeugprofil, Sichtungen, Trennungen, Abstellort |
 | `get_parked_vehicles()` | geschätzt abgestellte Fahrzeuge mit Ort, Ankunftszug und Sicherheit |
+| `scanner_schedule(p_enabled, p_windows, p_keep_awake)` | Zeitplan des Webscanners speichern, nur angemeldet |
 | `report_formation(p_pin, p_trip_id, p_vehicles, p_station_id?)` | eigene Fahrzeugmeldung (Detailpanel „Fahrzeug melden“), Fehler als `{error}`; der PIN-Hash liegt in `private.app_config` (`report_pin_hash`) |
 
 ## Cron-Jobs

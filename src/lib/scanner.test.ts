@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LiveTrip, TripStop } from "./api";
-import { applyWebDelay, isStaleWebOnly, webSeenState, type ScanRun, type WebInfo } from "./scanner";
+import { applyWebDelay, isStaleWebOnly, scheduleText, webSeenState, type ScannerSchedule, type ScanRun, type WebInfo } from "./scanner";
 
 const NOW = Date.parse("2026-11-23T18:00:00Z");
 const stop = (seq: number, id: string, min: number, est: string | null = null): TripStop => {
@@ -48,4 +48,24 @@ it("nur alte reine Webfahrten werden abgeblendet", () => {
   expect(isStaleWebOnly(trip({ source: "web_dbf", web: old }), NOW)).toBe(true);
   expect(isStaleWebOnly(trip({ source: "web_dbf" }), NOW)).toBe(false);
   expect(isStaleWebOnly(trip({ web: old }), NOW)).toBe(false);
+});
+
+describe("scheduleText", () => {
+  const at = Date.parse("2026-11-25T20:00:00Z"); // 21:00 Uhr
+  const st = (o: Partial<ScannerSchedule> = {}, enabled = false, worker_online = true) => ({
+    enabled, worker_online,
+    schedule: { enabled: true, windows: [], keep_awake: true, on: false, window_end: null, next_start: "2026-11-26T03:45:00Z", ...o },
+  });
+  it("nennt das nächste Einschalten", () => {
+    expect(scheduleText(st(), at)).toBe("Schaltet morgen um 04:45 Uhr ein.");
+    expect(scheduleText(st({ next_start: "2026-11-25T21:00:00Z" }), at)).toBe("Schaltet heute um 22:00 Uhr ein.");
+  });
+  it("unterscheidet Zeitplan und Schalter von Hand", () => {
+    const end = { window_end: "2026-11-26T00:15:00Z" };
+    expect(scheduleText(st({ ...end, on: true }, true), at)).toBe("Vom Zeitplan eingeschaltet, schaltet um 01:15 Uhr aus.");
+    expect(scheduleText(st(end, true), at)).toContain("Von Hand eingeschaltet");
+    expect(scheduleText(st(end), at)).toContain("von Hand ausgeschaltet");
+    expect(scheduleText(st(end, false, false), at)).toContain("Worker ist offline");
+  });
+  it("ausgeschaltet", () => expect(scheduleText(st({ enabled: false }), at)).toContain("festen Uhrzeiten"));
 });

@@ -30,6 +30,8 @@ export interface Control {
   interval_min: number;
   formations_enabled: boolean;
   pages: Page[] | null;
+  /** Ende des Zeitfensters, solange der Zeitplan den Rechner wach halten soll */
+  keep_awake_until?: string | null;
   due: "interval" | "manual" | null;
   abort: boolean;
 }

@@ -1,5 +1,6 @@
 import type { LiveTrip } from "./api";
 import { getSupabase } from "./supabase";
+import { fmtDateTime, fmtTime } from "./time";
 
 /** Stand des Webscanners zu einer Fahrt (Teil von get_live_trips). */
 export interface WebInfo {
@@ -31,12 +32,36 @@ export interface ScanRun {
   error: string | null;
 }
 
+export interface ScheduleWindow {
+  /** HH:MM, deutsche Zeit; „to“ vor „from“ heißt: am nächsten Tag */
+  from: string;
+  to: string;
+}
+
+export interface ScannerSchedule {
+  enabled: boolean;
+  windows: ScheduleWindow[];
+  keep_awake: boolean;
+  /** Scanner wurde vom Zeitplan eingeschaltet */
+  on: boolean;
+  /** Ende des laufenden Zeitfensters */
+  window_end: string | null;
+  next_start: string | null;
+}
+
+/** Abend und Morgen: die Ankünfte vor und die Abfahrten nach der nächtlichen Abstellung */
+export const SUGGESTED_WINDOWS: ScheduleWindow[] = [
+  { from: "04:45", to: "09:30" },
+  { from: "20:30", to: "01:15" },
+];
+
 export interface ScannerStatus {
   now: string;
   enabled: boolean;
   enabled_changed_at: string | null;
   interval_min: number;
   formations_enabled: boolean;
+  schedule: ScannerSchedule;
   manual_pending: boolean;
   worker_online: boolean;
   heartbeat_at: string | null;
@@ -94,6 +119,33 @@ export async function scannerControl(key: string | null, action: ScannerAction, 
   const r = data as { ok: boolean; error?: string; status?: ScannerStatus };
   if (!r.ok || !r.status) throw new Error(r.error ?? "Unbekannter Fehler");
   return r.status;
+}
+
+export async function setSchedule(enabled: boolean, windows: ScheduleWindow[], keepAwake: boolean): Promise<ScannerStatus> {
+  const { data, error } = await getSupabase().rpc("scanner_schedule", { p_enabled: enabled, p_windows: windows, p_keep_awake: keepAwake });
+  if (error) throw new Error(error.message);
+  const r = data as { ok: boolean; error?: string; status?: ScannerStatus };
+  if (!r.ok || !r.status) throw new Error(r.error ?? "Unbekannter Fehler");
+  return r.status;
+}
+
+/** Was der Zeitplan gerade tut oder als Nächstes tut. */
+export function scheduleText(s: Pick<ScannerStatus, "schedule" | "enabled" | "worker_online">, now: number): string {
+  const p = s.schedule;
+  if (!p.enabled) return "Schaltet den Scanner zu festen Uhrzeiten ein und wieder aus.";
+  const next = p.next_start ? `${sameDay(p.next_start, now) ? "heute" : "morgen"} um ${fmtTime(p.next_start)} Uhr` : null;
+  if (p.window_end) {
+    if (p.on) return `Vom Zeitplan eingeschaltet, schaltet um ${fmtTime(p.window_end)} Uhr aus.${s.worker_online ? "" : " Der Worker ist gerade offline."}`;
+    if (s.enabled) return "Zeitfenster läuft. Von Hand eingeschaltet, bleibt danach an.";
+    if (!s.worker_online) return "Zeitfenster läuft, aber der Worker ist offline.";
+    return `Für dieses Zeitfenster von Hand ausgeschaltet.${next ? ` Nächstes Einschalten ${next}.` : ""}`;
+  }
+  if (s.enabled && !p.on) return `Von Hand eingeschaltet, der Zeitplan schaltet nicht aus.${next ? ` Nächstes Zeitfenster ${next}.` : ""}`;
+  return next ? `Schaltet ${next} ein.` : "Kein Zeitfenster eingetragen.";
+}
+
+function sameDay(iso: string, now: number): boolean {
+  return fmtDateTime(iso).slice(0, 10) === fmtDateTime(now).slice(0, 10);
 }
 
 /** Läuft die Seite auf dem eigenen Rechner (npm run dev)? Dann geht die Steuerung ohne Schlüssel. */

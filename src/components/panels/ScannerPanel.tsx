@@ -16,6 +16,7 @@ import {
   type WebTrain,
 } from "@/lib/scanner";
 import { fmtDateTime, fmtRelative, fmtTime, fmtTimeSec } from "@/lib/time";
+import { SchedulePanel } from "./SchedulePanel";
 import { AppNav } from "./StatusBar";
 
 const RUN_LABEL: Record<ScanRun["status"], [string, string]> = {
@@ -91,7 +92,7 @@ export function ScannerPanel() {
         <h1 className="text-xl font-semibold tracking-tight">Live-Webscanner</h1>
         <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-muted">
           Öffnet die hinterlegten Webseiten in einem echten Browser, liest die sichtbaren S-Bahn-Fahrten ab und ergänzt damit die Karte.
-          Läuft nur, wenn er hier eingeschaltet wird.
+          Läuft nur, wenn du ihn hier einschaltest oder einen Zeitplan aktivierst.
         </p>
 
         {error && <p className="mt-4 text-[13px] text-bad">Status nicht abrufbar: {error}</p>}
@@ -193,6 +194,8 @@ export function ScannerPanel() {
               )}
               {msg && <p role="alert" className="mt-3 text-[12px] text-bad">{msg}</p>}
             </section>
+
+            <SchedulePanel status={s} apply={apply} now={now} />
 
             {/* Status */}
             <section className="mt-4 grid gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-2 lg:grid-cols-3">
