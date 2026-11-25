@@ -15,6 +15,7 @@ import {
   type TrainRun,
   type VehicleSearchResult,
 } from "@/lib/api";
+import { vehicleStatusLabel } from "@/lib/parking";
 import { fmtDateTime, fmtRelative, fmtTime } from "@/lib/time";
 import { parseTrainNumber, unitNumber } from "@/lib/trips";
 import { ScanNowButton } from "./ScanNowButton";
@@ -222,6 +223,7 @@ function TrainRuns({ train, runs, now, lineStyle }: { train: string; runs: Train
 
 function VehicleProfile({ r, now, lineStyle }: { r: VehicleSearchResult; now: number; lineStyle: LineStyleFn }) {
   const v = r.vehicle;
+  const running = r.parking?.status === "in_service" || r.parking?.status === "turning";
   const sightings = [...r.sightings].sort((a, b) => Date.parse(b.observed_at) - Date.parse(a.observed_at));
   const splits = [...r.splits].sort((a, b) => Date.parse(b.detected_at) - Date.parse(a.detected_at));
   return (
@@ -247,7 +249,7 @@ function VehicleProfile({ r, now, lineStyle }: { r: VehicleSearchResult; now: nu
       )}
 
       <dl className="mt-4 grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
-        <Field k="Status">{v.status ?? "unbekannt"}</Field>
+        <Field k="Status">{vehicleStatusLabel(v.status)}</Field>
         <Field k="Letzte Sichtung">
           {v.last_seen ? (
             <>
@@ -273,11 +275,13 @@ function VehicleProfile({ r, now, lineStyle }: { r: VehicleSearchResult; now: nu
         {r.parking ? (
           <div className="text-[13px]">
             <div>
+              {running && "Nicht abgestellt, Richtung "}
               {r.parking.station_name ?? "Ort unbekannt"}
-              {r.parking.status && <span className="text-muted"> · {r.parking.status}</span>}
+              {r.parking.status && <span className="text-muted"> · {vehicleStatusLabel(r.parking.status)}</span>}
             </div>
             <div className="mt-0.5 text-[12px] text-muted">
-              Sicherheit {fmtConfidence(r.parking.confidence)} · letzte Sichtung {fmtRelative(r.parking.last_sighting_at, now)}
+              {/* Nur bei einer vermuteten Abstellung gilt der Wert für den Ort */}
+              {r.parking.status === "parked_assumed" && `Sicherheit ${fmtConfidence(r.parking.confidence)} · `}letzte Sichtung {fmtRelative(r.parking.last_sighting_at, now)}
             </div>
             {r.parking.reason && <p className="mt-1 text-[12px] text-faint">Begründung: {r.parking.reason}</p>}
             <p className="mt-1 text-[11px] text-faint">Abgeleitet aus Sichtungen – keine bestätigte Ortung.</p>

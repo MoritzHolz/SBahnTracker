@@ -99,6 +99,7 @@ Das Collector-Secret liegt in `private.app_config` (nicht über die API lesbar) 
 | `formations` | erfasste Wagenreihung (Fahrzeugliste) je Fahrt/Station/Zeit |
 | `vehicle_sightings` | Fahrtenbuch (aus `formations` per Trigger) |
 | `split_events` | mögliche Trennung/Vereinigung/Umstellung mit Konfidenz |
+| `stabling_sites` | Lage der Abstellgleise je Endstation (OpenStreetMap) |
 | `parking_estimates` | vermuteter Abstellort/Status mit Konfidenz und Begründung |
 | `collector_runs` | Protokoll jedes Sammellaufs |
 
@@ -114,6 +115,7 @@ Geschrieben wird über `security definer`-Funktionen mit `service_role`, über T
 | `get_route_shapes()` | alle Geometrien `[[lon,lat],…]` |
 | `get_source_status()` | letzter Sammellauf, letzter Erfolg, Status Wagenreihungsquelle |
 | `search_vehicle(p_query)` | Fahrzeugprofil, Sichtungen, Trennungen, Abstellort |
+| `get_parked_vehicles()` | geschätzt abgestellte Fahrzeuge mit Ort, Ankunftszug und Sicherheit |
 | `report_formation(p_pin, p_trip_id, p_vehicles, p_station_id?)` | eigene Fahrzeugmeldung (Detailpanel „Fahrzeug melden“), Fehler als `{error}`; der PIN-Hash liegt in `private.app_config` (`report_pin_hash`) |
 
 ## Cron-Jobs
@@ -121,7 +123,7 @@ Geschrieben wird über `security definer`-Funktionen mit `service_role`, über T
 | Job | Takt | Aufgabe |
 |---|---|---|
 | `collect-efa` | `*/3 * * * *` | Edge Function `collect` auslösen |
-| `parking-estimates` | `*/15 * * * *` | Abstellort-/Statusschätzung neu berechnen |
+| `parking-estimates` | `*/5 * * * *` | Abstellort-/Statusschätzung neu berechnen |
 | `cleanup` (ausstehend) | täglich 03:17 | Fahrten > 30 Tage, Logs > 7 Tage löschen |
 
 ## Tracking-Logik
@@ -148,16 +150,25 @@ Mit synthetischen Daten getestet: 8 → 4 Fahrzeuge an einer anderen Station erg
 
 ## Abstellort-Erkennung
 
-`private.update_parking_estimates()` läuft alle 15 min und nimmt je Fahrzeug die letzte Sichtung samt Fahrt:
+`private.update_parking_estimates()` läuft alle 5 min und prüft je Fahrzeug die letzte gelesene Fahrt. Kommt es nach der Ankunft in keiner gelesenen Abfahrt mehr vor, gilt es als abgestellt. In den gesammelten Daten starten Rückfahrten 3 bis 27 min nach der Ankunft am selben Bahnhof, deshalb die Wartezeit von 40 min.
 
-| Lage | Status | Konfidenz |
+| Lage | Status | Anzeige |
 |---|---|---|
-| Fahrt läuft noch | `in_service` | 0,8 |
-| Ankunft < 60 min her | `last_known` (Folgefahrt möglich) | 0,4 |
-| 60–90 min ohne neue Sichtung | `parked_assumed` am Endhalt | 0,5 |
-| 90 min – 12 h | `parked_assumed` | 0,6 |
-| Endhalt Plochingen (Werk), < 12 h | `maintenance_possible` | 0,3 |
-| > 12 h | `unknown` | 0,1 |
+| Fahrt läuft noch | `in_service` | im Einsatz |
+| Ankunft vor weniger als 40 min | `turning` | wendet |
+| Keine Rückfahrt, Sicherheit ≥ 0,75 | `parked_assumed` | „wahrscheinlich hier“ |
+| Keine Rückfahrt, Sicherheit 0,5 bis 0,75 | `parked_assumed` | „vermutlich hier“ |
+| Sicherheit < 0,5, aber mindestens 85 % der letzten Fahrten gelesen | `absent` | „nicht im Einsatz, Ort unsicher“ |
+| Zu wenig gelesen, oder seit 4 Tagen nicht gesehen | `unknown` | nicht angezeigt |
+
+Sicherheit = 0,9 · s1 · (0,35 + 0,65 · s2):
+- s1: Anteil der gelesenen Abfahrten am Ankunftsbahnhof in den ersten 40 min (0,85, wenn dort keine fuhr).
+- s2: Anteil der gelesenen Abfahrten danach (1, wenn es keine gab).
+- Halbiert, wenn der Fahrplanabruf länger als 15 min ausfällt.
+
+Grenzen: Die Schätzung ist nur so gut wie die Scans. Leerfahrten und nicht gelesene Züge sind unsichtbar. Die Lage der Abstellgleise stammt aus OpenStreetMap (`stabling_sites`); ob genau diese Gleise genutzt werden, ist nicht bestätigt. Wo keine bekannt sind (z. B. Filderstadt, Flughafen), steht das Zeichen am Bahnhof.
+
+Karte: violettes „A“ mit Anzahl („3?“ = nur unsichere Fahrzeuge), Antippen öffnet die Fahrzeugliste. Seitenleiste: „Abgestellt (geschätzt)“.
 
 ## Kosten
 

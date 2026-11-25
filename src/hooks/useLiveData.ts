@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchLines,
   fetchLiveTrips,
+  fetchParked,
   fetchRouteShapes,
   fetchRouteShapesByIds,
   fetchSourceStatus,
@@ -12,8 +13,11 @@ import {
   type RouteShape,
   type SourceStatus,
 } from "@/lib/api";
+import type { ParkedVehicle } from "@/lib/parking";
 
 const TRIPS_INTERVAL_MS = 30_000;
+/** Die Datenbank schätzt die Abstellungen alle 5 min neu */
+const PARKED_INTERVAL_MS = 60_000;
 const LINES_INTERVAL_MS = 10 * 60_000;
 /** Fehlende Shapes frühestens nach dieser Zeit erneut anfragen */
 const SHAPE_RETRY_MS = 3 * 60_000;
@@ -24,6 +28,8 @@ export interface LiveData {
   shapeList: RouteShape[];
   lines: Map<string, Line>;
   lineList: Line[];
+  /** geschätzt abgestellte Fahrzeuge */
+  parked: ParkedVehicle[];
   status: SourceStatus | null;
   /** Zeitpunkt des letzten erfolgreichen Trip-Abrufs im Browser */
   fetchedAt: number | null;
@@ -79,6 +85,7 @@ export function useLiveData(): LiveData {
   const [trips, setTrips] = useState<LiveTrip[]>([]);
   const [shapes, setShapes] = useState<Map<number, RouteShape>>(() => new Map());
   const [lineList, setLines] = useState<Line[]>([]);
+  const [parked, setParked] = useState<ParkedVehicle[]>([]);
   const [status, setStatus] = useState<SourceStatus | null>(null);
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -127,6 +134,11 @@ export function useLiveData(): LiveData {
   }, [latest, setErr]);
   useInterval(loadTrips, TRIPS_INTERVAL_MS);
 
+  /* Abstellungen: Zusatzinfo, ein Fehler darf die Karte nicht stören */
+  useInterval(() => {
+    latest("parked", fetchParked(), setParked, (e) => console.warn(e.message));
+  }, PARKED_INTERVAL_MS);
+
   /* Linien selten */
   useInterval(() => {
     latest("lines", fetchLines(), setLines, (e) => console.warn(e.message));
@@ -163,7 +175,7 @@ export function useLiveData(): LiveData {
   const lines = useMemo(() => new Map(lineList.map((l) => [l.id, l])), [lineList]);
   const error = [errors.trips, errors.status].filter(Boolean).join(" · ") || null;
 
-  return { trips, shapes, shapeList, lines, lineList, status, fetchedAt, loading, error, refresh: loadTrips };
+  return { trips, shapes, shapeList, lines, lineList, parked, status, fetchedAt, loading, error, refresh: loadTrips };
 }
 
 /** Tick für UI-Aktualisierungen (Listen, relative Zeiten). */
