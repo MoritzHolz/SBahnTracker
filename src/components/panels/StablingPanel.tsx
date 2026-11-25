@@ -99,7 +99,7 @@ export function StablingPanel() {
           <DataBadge state="vermutung" label="Aus Scans erkannt" />
         </div>
         <p className="mt-1 text-[13px] leading-relaxed text-muted">
-          Mi 25.11.2026, 14:35 Uhr bis Mi 02.12.2026. Ausgewertet werden Abstellungen von Montag bis Freitag.
+          Mi 25.11.2026, 14:35 Uhr bis Mi 02.12.2026, einschließlich Wochenende.
         </p>
 
         {error && <p role="alert" className="mt-4 text-[13px] text-bad">Protokoll nicht abrufbar: {error}</p>}

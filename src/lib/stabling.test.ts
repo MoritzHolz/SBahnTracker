@@ -9,8 +9,8 @@ const e = (o: Partial<StablingEntry>): StablingEntry => ({
 });
 
 describe("Abstellprotokoll", () => {
-  it("wertet im Zeitraum nur Montag bis Freitag aus", () => {
-    expect(periodDays()).toEqual(["2026-11-25", "2026-11-26", "2026-11-27", "2026-11-30", "2026-12-01", "2026-12-02"]);
+  it("wertet alle Tage im Zeitraum aus, auch das Wochenende", () => {
+    expect(periodDays()).toEqual(["2026-11-25", "2026-11-26", "2026-11-27", "2026-11-28", "2026-11-29", "2026-11-30", "2026-12-01", "2026-12-02"]);
     expect(fmtDay(LOG_FROM)).toBe("Mi 25.11.");
   });
 

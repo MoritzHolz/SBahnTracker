@@ -36,11 +36,11 @@ export interface StablingLog {
   entries: StablingEntry[];
 }
 
-/** Auswertungszeitraum: ab Beginn der Aufzeichnung bis einschließlich Mi 02.12.2026, nur Mo–Fr */
+/** Auswertungszeitraum: ab Beginn der Aufzeichnung bis einschließlich Mi 02.12.2026, alle Tage */
 export const LOG_FROM = "2026-11-25T14:35:00+01:00";
 export const LOG_TO = "2026-12-03T00:00:00+01:00";
 
-export async function fetchStablingLog(from = LOG_FROM, to = LOG_TO, weekdaysOnly = true): Promise<StablingLog> {
+export async function fetchStablingLog(from = LOG_FROM, to = LOG_TO, weekdaysOnly = false): Promise<StablingLog> {
   const { data, error } = await getSupabase().rpc("get_stabling_log", { p_from: from, p_to: to, p_weekdays_only: weekdaysOnly });
   if (error) throw new Error(`get_stabling_log: ${error.message}`);
   const d = (data ?? {}) as Partial<StablingLog>;
@@ -71,13 +71,10 @@ export function dayStart(key: string): number {
 
 const nextDay = (key: string) => new Date(Date.parse(`${key}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
 
-/** Montag bis Freitag im Zeitraum */
+/** Alle Kalendertage im Zeitraum, auch Samstag und Sonntag */
 export function periodDays(from = LOG_FROM, to = LOG_TO): string[] {
   const days: string[] = [];
-  for (let k = dayKey(from); dayStart(k) < Date.parse(to); k = nextDay(k)) {
-    const wd = new Date(`${k}T12:00:00Z`).getUTCDay();
-    if (wd !== 0 && wd !== 6) days.push(k);
-  }
+  for (let k = dayKey(from); dayStart(k) < Date.parse(to); k = nextDay(k)) days.push(k);
   return days;
 }
 
