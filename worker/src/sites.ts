@@ -20,10 +20,16 @@ async function open(page: PwPage, url: string): Promise<void> {
   if (guarded) throw new SiteBlocked(`${host} verlangt Anmeldung oder CAPTCHA. Das wird nicht umgangen.`);
 }
 
+/** Einzige erlaubte Anfrage beim Ablesen einer Tafel: das Dokument selbst */
+export const onlyDocument = (type: string, reqUrl: string, pageUrl: string) => type === "document" && reqUrl === new URL(pageUrl).href;
+
 /** Abfahrtstafel von dbf.finalrewind.org ablesen. */
 export async function readDbfBoard(ctx: BrowserContext, url: string): Promise<RawBoardRow[]> {
   const page = await ctx.newPage();
   try {
+    // Nur die eine Seite abrufen (Crawl-delay 20 s): Die Abfahrten stehen schon im HTML.
+    // Layout, Skripte, Schriften und Nachladen werden nicht angefragt.
+    await page.route("**/*", (r) => (onlyDocument(r.request().resourceType(), r.request().url(), url) ? r.continue() : r.abort()));
     await open(page, url);
     await page.waitForSelector(".app li[data-train]", { timeout: 20_000 }).catch(() => {
       throw new Error("Keine Abfahrten auf der Seite gefunden (Seite leer oder umgebaut).");

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { inWindow, parseDelay, parseFormation, resolveTime, toBoardRecord, type RawBoardRow } from "./parse.ts";
 import { isAllowed, parseRobots } from "./robots.ts";
+import { onlyDocument } from "./sites.ts";
 
 const NOW = Date.parse("2026-11-23T17:55:00Z"); // 18:55 Ortszeit
 
@@ -75,6 +76,15 @@ describe("robots", () => {
     expect(r.crawlDelaySec).toBe(20);
     expect(isAllowed(r, "/Stuttgart%20Hbf%20(tief)?past=1")).toBe(true);
     expect(isAllowed(r, "/z/S%207156")).toBe(false);
+    expect(isAllowed(r, "/map/123")).toBe(false);
+    expect(isAllowed(r, "/Stuttgart-Feuerbach?past=1")).toBe(true);
+  });
+  it("lädt bei DBF nur die Seite selbst, keine Nebenanfragen", () => {
+    const u = "https://dbf.finalrewind.org/Stuttgart%20Hbf%20(tief)?past=1";
+    expect(onlyDocument("document", u, u)).toBe(true);
+    expect(onlyDocument("script", "https://dbf.finalrewind.org/static/v110/js/dbf.min.js", u)).toBe(false);
+    expect(onlyDocument("stylesheet", "https://dbf.finalrewind.org/static/v110/css/light.min.css", u)).toBe(false);
+    expect(onlyDocument("document", "https://dbf.finalrewind.org/z/S%207156", u)).toBe(false);
   });
   it("Allow: *", () => expect(isAllowed(parseRobots("User-agent: *\nAllow: *"), "/x")).toBe(true));
   it("Komplettsperre", () => expect(isAllowed(parseRobots("User-agent: *\nDisallow: /"), "/x")).toBe(false));

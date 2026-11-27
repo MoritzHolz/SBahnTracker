@@ -61,6 +61,8 @@ if (process.env.SCANNER_EXIT_WITH_PARENT === "1") {
 const shortError = (e: unknown) => (e instanceof Error ? e.message : String(e)).split("\n")[0].slice(0, 300);
 
 const lastAccess = new Map<string, number>();
+/** Nach einem Neustart ist der letzte Abruf unbekannt: so tun, als wäre er gerade gewesen */
+const startedUp = Date.now();
 
 async function scan(runId: number, control: Control): Promise<void> {
   const abort = new AbortController();
@@ -124,7 +126,7 @@ async function scan(runId: number, control: Control): Promise<void> {
     const robots = await loadRobots(target.origin, ua, abort.signal);
     if (!isAllowed(robots, target.pathname + target.search)) throw new SiteBlocked(`${target.host}: robots.txt untersagt den Abruf.`);
     const gap = Math.max(MIN_GAP_MS, robots.crawlDelaySec * 1000);
-    const wait = (lastAccess.get(target.host) ?? 0) + gap - Date.now();
+    const wait = (lastAccess.get(target.host) ?? startedUp) + gap - Date.now();
     if (wait > 0) {
       step = `Wartet ${Math.ceil(wait / 1000)} s (Abstandsregel von ${target.host})`;
       await sleep(wait, abort.signal);
@@ -150,6 +152,8 @@ async function scan(runId: number, control: Control): Promise<void> {
       try {
         await visit(page, ua);
         const rows = await readDbfBoard(ctx, page.url);
+        // Abstand ab Ende des Abrufs zählen
+        lastAccess.set(new URL(page.url).host, Date.now());
         const now = Date.now();
         const records: BoardRecord[] = rows
           .map((r) => toBoardRecord(r, page.station_name, now))
