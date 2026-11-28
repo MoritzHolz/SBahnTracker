@@ -14,6 +14,7 @@ import {
   durationText,
   endText,
   MarkButton,
+  RecurBadge,
   RelBadge,
   startText,
   STATUS,
@@ -42,8 +43,9 @@ interface Filters {
   marked: boolean;
   a: boolean;
   b: boolean;
+  recur: boolean;
 }
-const NO_FILTER: Filters = { q: "", station: "", weekday: "", date: "", status: "", marked: false, a: false, b: false };
+const NO_FILTER: Filters = { q: "", station: "", weekday: "", date: "", status: "", marked: false, a: false, b: false, recur: false };
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
 
@@ -74,6 +76,7 @@ export function ProtocolView(p: ViewProps) {
     if (f.marked && !marks.anyMarked(s.vehicles)) return false;
     if (f.a && !rels(s).some((r) => r.category === "A")) return false;
     if (f.b && !rels(s).some((r) => r.category === "B")) return false;
+    if (f.recur && !p.recur.has(s.key)) return false;
     return true;
   };
   const shown = stays.filter((s) => matches(s));
@@ -162,6 +165,9 @@ export function ProtocolView(p: ViewProps) {
         <button aria-pressed={f.b} onClick={() => set("b", !f.b)} className={`${chip(f.b)} inline-flex items-center gap-1.5`}>
           <RelBadge category="B" /> ungefähre (≤ {p.windowMin} min)
         </button>
+        <button aria-pressed={f.recur} onClick={() => set("recur", !f.recur)} className={`${chip(f.recur)} inline-flex items-center gap-1.5`}>
+          <span className="font-semibold" style={{ color: C.recur }}>↻</span> wiederkehrend
+        </button>
         <span className="tnum ml-auto text-[12.5px] text-muted" aria-live="polite">
           {shown.length} von {stays.length}
         </span>
@@ -188,12 +194,12 @@ export function ProtocolView(p: ViewProps) {
         ) : shown.length === 0 ? (
           <Empty text="Für diese Auswahl gibt es keine Abstellung." />
         ) : mode === "chronik" ? (
-          <Chronicle list={stays.filter((s) => matches(s, true))} date={f.date} days={days} {...{ marks, selected, select, lineStyle }} />
+          <Chronicle list={stays.filter((s) => matches(s, true))} date={f.date} days={days} {...{ marks, selected, select, lineStyle, recur: p.recur }} />
         ) : (
           <Groups
             groups={mode === "liste" ? groupByDay(shown) : groupByStation(shown)}
             byStation={mode === "bahnhof"}
-            {...{ now, marks, selected, select, lineStyle, rels }}
+            {...{ now, marks, selected, select, lineStyle, rels, recur: p.recur }}
           />
         )}
       </div>
@@ -230,17 +236,20 @@ type RowCtx = {
   select: (k: string | null) => void;
   lineStyle: ViewProps["lineStyle"];
   rels: (s: Stay) => ViewProps["relations"];
+  recur: ViewProps["recur"];
 };
 
-function RelCell({ s, rels }: { s: Stay; rels: RowCtx["rels"] }) {
+function RelCell({ s, rels, recur }: { s: Stay; rels: RowCtx["rels"]; recur: RowCtx["recur"] }) {
   const r = rels(s);
   const a = r.filter((x) => x.category === "A").length;
   const b = r.length - a;
-  if (!r.length) return <span className="text-faint">–</span>;
+  const slot = recur.get(s.key);
+  if (!r.length && !slot) return <span className="text-faint">–</span>;
   return (
     <span className="inline-flex flex-wrap gap-1">
       {a > 0 && <RelBadge category="A" count={a} title={`${a} tatsächliche Überschneidung${a > 1 ? "en" : ""} am Standort`} />}
       {b > 0 && <RelBadge category="B" count={b} title={`${b} möglicher zeitlicher Zusammenhang${b > 1 ? "e" : ""} am Standort`} />}
+      {slot && <RecurBadge slot={slot} compact />}
     </span>
   );
 }
@@ -329,7 +338,7 @@ function Groups({ groups, byStation, ...c }: { groups: Group[]; byStation: boole
                           <span className="text-[12px] leading-tight">{STATUS[st].label}</span>
                         </span>
                       </td>
-                      <td className="py-2.5 pr-4"><RelCell s={s} rels={c.rels} /></td>
+                      <td className="py-2.5 pr-4"><RelCell s={s} rels={c.rels} recur={c.recur} /></td>
                     </tr>
                   );
                 })}
@@ -362,7 +371,7 @@ function Groups({ groups, byStation, ...c }: { groups: Group[]; byStation: boole
                       <LineBadge id={s.entry.line_id} {...lineStyle(s.entry.line_id)} size="sm" />
                       <span className="tnum">Zug {s.entry.train_number}</span>
                       <span>· {s.entry.cars} Waggons</span>
-                      <RelCell s={s} rels={c.rels} />
+                      <RelCell s={s} rels={c.rels} recur={c.recur} />
                     </div>
                     <dl className="mt-1.5 grid grid-cols-[5.5rem_1fr] gap-y-1 text-[13px]">
                       <dt className="text-faint">{byStation ? "Tag" : "Standort"}</dt>

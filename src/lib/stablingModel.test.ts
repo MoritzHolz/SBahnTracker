@@ -8,7 +8,8 @@ import {
   nightSpan,
   notesInRange,
   notesOn,
-  patterns,
+  recurringSlots,
+  slotLabel,
   segmentsIn,
   stationChains,
   stayDuration,
@@ -129,12 +130,11 @@ describe("Zusammenhänge nur aus Abstellzeiten", () => {
     expect(findRelations(toStays(mon), 10, NOW).filter((x) => x.category === "B")).toHaveLength(0);
   });
 
-  it("Fall 8: selber Standort an einem anderen Tag ist kein Zusammenhang, aber ein Muster", () => {
+  it("Fall 8: selber Standort an einem anderen Tag ist kein Zusammenhang und keine Wiederholung", () => {
     const r = findRelations(toStays(mon), 60, NOW);
     expect(r.some((x) => x.a.vehicles.includes("430 108") || x.b.vehicles.includes("430 108"))).toBe(false);
-    const p = patterns(toStays(mon));
-    expect(p).toHaveLength(1);
-    expect([p[0].stationName, p[0].train, p[0].days, p[0].sameTime]).toEqual(["Plochingen", "7001", ["2026-11-23", "2026-11-24"], true]);
+    // Mo 08:00 und Di 08:05 liegen in derselben Woche → zählt nicht als Woche für Woche
+    expect(recurringSlots(toStays(mon), 60).slots).toHaveLength(0);
   });
 
   it("andere Standorte werden nie über die Zeit verknüpft", () => {
@@ -235,5 +235,46 @@ describe("Notizen und Datenbasis", () => {
     expect(wed.stay).toBe(thu.stay);
     expect(night.stay).toBe(stays[0]);
     expect(new Set([wed, thu, night].map((s) => s.stay.key)).size).toBe(1);
+  });
+});
+
+describe("Wiederkehrend Woche für Woche", () => {
+  const Z = (iso: string) => `${iso}:00+01:00`;
+  const hb = (iso: string, v: string, station = "Herrenberg") => E(station, Z(iso), null, [v], { state: "departed" });
+  // Herrenberg, montags gegen 23:40, jedes Mal ein anderes Fahrzeug und ein anderer Zug
+  const weeks = [hb("2026-11-23T23:35", "423 001"), hb("2026-11-30T23:50", "423 002"), hb("2026-12-07T23:41", "430 003")];
+
+  it("gleicher Ort, gleicher Wochentag, ähnliche Uhrzeit in drei Wochen ergibt ein Zeitfenster", () => {
+    const { slots, byStay } = recurringSlots(toStays(weeks), 30);
+    expect(slots).toHaveLength(1);
+    expect(slots[0].stationName).toBe("Herrenberg");
+    expect(slots[0].weeks).toEqual(["2026-11-23", "2026-11-30", "2026-12-07"]);
+    expect(slotLabel(slots[0])).toBe("Mo ca. 23:41 (23:35–23:50)");
+    expect(byStay.size).toBe(3);
+  });
+
+  it("Zug- und Fahrzeugnummer spielen keine Rolle, der Abstellort schon", () => {
+    const other = [hb("2026-11-23T23:35", "423 001"), hb("2026-11-30T23:40", "423 002", "Backnang")];
+    expect(recurringSlots(toStays(other), 60).slots).toHaveLength(0);
+  });
+
+  it("die Toleranz entscheidet, was als ähnliche Uhrzeit gilt", () => {
+    const far = [hb("2026-11-23T22:30", "423 001"), hb("2026-11-30T23:50", "423 002")];
+    expect(recurringSlots(toStays(far), 30).slots).toHaveLength(0);
+    expect(recurringSlots(toStays(far), 60).slots).toHaveLength(1);
+  });
+
+  it("gezählt werden verschiedene Wochen, nicht Abstellungen", () => {
+    const twice = [hb("2026-11-23T23:35", "423 001"), hb("2026-11-23T23:45", "423 002"), hb("2026-11-30T23:40", "423 003")];
+    expect(recurringSlots(toStays(twice), 30, 3).slots).toHaveLength(0);
+    const sl = recurringSlots(toStays(twice), 30, 2).slots;
+    expect(sl).toHaveLength(1);
+    expect(sl[0].weeks).toHaveLength(2);
+    expect(sl[0].stays).toHaveLength(3);
+  });
+
+  it("anderer Wochentag zur gleichen Uhrzeit zählt nicht", () => {
+    const wd = [hb("2026-11-23T23:35", "423 001"), hb("2026-12-01T23:35", "423 002")];
+    expect(recurringSlots(toStays(wd), 120).slots).toHaveLength(0);
   });
 });

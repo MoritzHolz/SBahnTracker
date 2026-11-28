@@ -6,10 +6,11 @@
  */
 import { useMemo, useState } from "react";
 import { LineBadge } from "@/components/ui/Badges";
-import { dayKey, fmtDay } from "@/lib/stabling";
+import { dayKey, FIRST_WEEK, fmtDay, weekLabel, weekNumber, weekOf } from "@/lib/stabling";
 import {
   drawEnd,
-  patterns,
+  RECUR_TOLERANCE,
+  slotLabel,
   stationChains,
   vehicleRuns,
   weekRange,
@@ -27,6 +28,7 @@ import {
   endText,
   fmtGap,
   Legend,
+  RecurBadge,
   RelBadge,
   startText,
   TransferMark,
@@ -79,8 +81,9 @@ export function AnalysisView(p: ViewProps) {
   const RUN_LIMIT = 12;
   const shownRuns = allRuns ? runs : runs.slice(0, RUN_LIMIT);
 
-  const pats = patterns(allStays).filter(
-    (pt) => pt.stays.some((s) => s.start >= wa && s.start < wb) && (!station || pt.station === station) && (!onlyMarked || pt.stays.some(markedStay)),
+  // Wiederkehrende Zeitfenster, die in dieser Woche vorkommen
+  const slots = p.recurSlots.filter(
+    (sl) => sl.stays.some((s) => s.start >= wa && s.start < wb) && (!station || sl.station === station) && (!onlyMarked || sl.stays.some(markedStay)),
   );
 
   const nA = weekRels.filter((r) => r.category === "A").length;
@@ -201,40 +204,74 @@ export function AnalysisView(p: ViewProps) {
       </section>
 
       <section aria-labelledby="ana-muster">
-        <h2 id="ana-muster" className="text-[15px] font-semibold">Wiederkehrende Muster</h2>
-        <p className="mt-0.5 text-[12.5px] text-muted">Derselbe Zug (Linie und Zugnummer der Ankunft) an mehreren Tagen am selben Standort abgestellt, auch mit Vorwoche.</p>
-        {pats.length === 0 ? (
-          <Empty>Kein Zug wurde in dieser Auswahl an mehreren Tagen am selben Standort abgestellt.</Empty>
+        <h2 id="ana-muster" className="text-[15px] font-semibold">
+          <span style={{ color: C.recur }}>↻</span> Wiederkehrend, Woche für Woche
+        </h2>
+        <p className="mt-0.5 text-[12.5px] text-muted">
+          Am selben Abstellort, am selben Wochentag und zu ähnlicher Uhrzeit wurde in mehreren Wochen ein Zug abgestellt. Welcher Zug oder welches Fahrzeug, ist egal.
+          {p.historyRange && <> Verglichen: {weekLabel(weekOf(p.historyRange.from)).split(" · ")[0]} bis {weekLabel(weekOf(p.historyRange.to)).split(" · ")[0]}.</>}
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div role="group" aria-label="Toleranz der Uhrzeit" className="flex items-center rounded-md border border-line p-0.5">
+            <span className="px-2 text-[12px] text-faint">Uhrzeit ±</span>
+            {RECUR_TOLERANCE.map((m) => (
+              <button key={m} aria-pressed={p.recurTol === m} onClick={() => p.setRecurTol(m)} className={seg(p.recurTol === m)}>
+                {m} min
+              </button>
+            ))}
+          </div>
+          <div role="group" aria-label="Mindestzahl Wochen" className="flex items-center rounded-md border border-line p-0.5">
+            <span className="px-2 text-[12px] text-faint">ab</span>
+            {[2, 3, 4].map((n) => (
+              <button key={n} aria-pressed={p.recurMinWeeks === n} onClick={() => p.setRecurMinWeeks(n)} className={seg(p.recurMinWeeks === n)}>
+                {n} Wochen
+              </button>
+            ))}
+          </div>
+        </div>
+        {!p.historyRange ? (
+          <Empty>Frühere Wochen werden geladen …</Empty>
+        ) : slots.length === 0 ? (
+          <Empty>
+            In dieser Auswahl wiederholt sich keine Abstellung in mindestens {p.recurMinWeeks} Wochen.
+            {p.historyRange.from === FIRST_WEEK && " Aufgezeichnet wird erst seit KW 48, deshalb gibt es noch wenige Wochen zum Vergleichen."}
+          </Empty>
         ) : (
           <ul className="mt-3 grid gap-3 sm:grid-cols-2">
-            {pats.map((pt) => {
-              const tod = pt.stays.map((s) => fmtTime(s.start));
-              return (
-                <li key={`${pt.station}|${pt.line}|${pt.train}`} className="rounded-lg border border-line p-3">
-                  <div className="flex flex-wrap items-center gap-1.5 text-[13px]">
-                    <span className="font-semibold">{pt.stationName}</span>
-                    <LineBadge id={pt.line} {...p.lineStyle(pt.line)} size="sm" />
-                    <span className="tnum text-muted">Zug {pt.train}</span>
-                    <span className="ml-auto text-[12px] text-muted">an {pt.days.length} Tagen</span>
-                  </div>
-                  <p className="mt-1 text-[12px]" style={{ color: pt.sameTime ? C.near : "var(--faint)" }}>
-                    {pt.sameTime ? `Ankunft jeweils um dieselbe Zeit (${tod[0]}${tod.length > 1 ? ` bis ${[...tod].sort().at(-1)}` : ""})` : "Ankunft zu unterschiedlichen Zeiten"}
-                  </p>
-                  <ul className="mt-2 flex flex-wrap gap-1.5 text-[12px]">
-                    {pt.stays.map((s) => (
+            {slots.map((sl) => (
+              <li key={sl.id} className="rounded-lg border p-3" style={{ borderColor: `${C.recur}55` }}>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
+                  <span className="font-semibold">{sl.stationName}</span>
+                  <span className="tnum text-muted">{slotLabel(sl)}</span>
+                  <span className="ml-auto"><RecurBadge slot={sl} /></span>
+                </div>
+                <ul className="mt-2 space-y-1 text-[12.5px]">
+                  {sl.stays.map((s) => {
+                    const on = p.selected === s.key;
+                    const mk = marks.anyMarked(s.vehicles);
+                    return (
                       <li key={s.key}>
-                        <StayChip s={s} {...p} hideStation />
+                        <button
+                          onClick={() => p.goTo("analyse", { day: dayKey(s.start), key: s.key })}
+                          className={`flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left hover:bg-white/[0.05] ${on ? "bg-white/[0.07]" : ""}`}
+                          style={mk ? { boxShadow: `inset 2px 0 0 ${C.marked}` } : undefined}
+                        >
+                          <span className="tnum w-12 shrink-0 text-faint">KW {weekNumber(weekOf(dayKey(s.start)))}</span>
+                          <span className="tnum w-28 shrink-0">{fmtDay(s.start)} {fmtTime(s.start)}</span>
+                          <span className="min-w-0 truncate"><Vehicles ids={s.vehicles} marks={marks} link={false} /></span>
+                          <span className="tnum ml-auto shrink-0 text-faint">{durationText(s, p.now)}</span>
+                        </button>
                       </li>
-                    ))}
-                  </ul>
-                </li>
-              );
-            })}
+                    );
+                  })}
+                </ul>
+              </li>
+            ))}
           </ul>
         )}
       </section>
 
-      <Legend parts={["status", "marked", "rel", "transfer"]} />
+      <Legend parts={["status", "marked", "rel", "recur", "transfer"]} />
     </div>
   );
 }

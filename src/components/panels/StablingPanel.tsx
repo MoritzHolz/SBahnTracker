@@ -18,8 +18,8 @@ import { DataBadge } from "@/components/ui/Badges";
 import { useNow } from "@/hooks/useLiveData";
 import { useMarks, useStationNotes } from "@/hooks/useStablingUser";
 import { fetchLines, lineColor, lineTextColor, type Line } from "@/lib/api";
-import { addDays, dayKey, fetchStablingWeek, FIRST_WEEK, weekDays, weekLabel, weekOf, type StablingWeek } from "@/lib/stabling";
-import { findRelations, relationsByStay, toStays, weekRange } from "@/lib/stablingModel";
+import { addDays, dayKey, fetchStablingHistory, fetchStablingWeek, FIRST_WEEK, weekDays, weekLabel, weekOf, type StablingEntry, type StablingWeek } from "@/lib/stabling";
+import { findRelations, recurringSlots, relationsByStay, toStays, weekRange } from "@/lib/stablingModel";
 import { AppNav } from "./StatusBar";
 
 const REFRESH_MS = 60_000;
@@ -68,6 +68,9 @@ export function StablingPanel() {
   // Standardnacht: die letzte (gestern → heute), sonst die erste der Woche
   const night = inWeek(nightPick) ?? (days.includes(addDays(today, -1)) ? addDays(today, -1) : days[0]);
 
+  const [history, setHistory] = useState<{ week: string; from: string; to: string; entries: StablingEntry[] } | null>(null);
+  const [recurTol, setRecurTol] = useState(60);
+  const [recurMinWeeks, setRecurMinWeeks] = useState(2);
   const marks = useMarks();
   const notes = useStationNotes();
 
@@ -99,6 +102,17 @@ export function StablingPanel() {
     // notes.reload ist stabil
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [week]);
+  // Umliegende Wochen für „wiederkehrend“; seltener neu laden als die Woche selbst
+  useEffect(() => {
+    let alive = true;
+    const load = () => fetchStablingHistory(week, Date.now()).then((h) => alive && setHistory({ week, ...h }), () => {});
+    void load();
+    const id = window.setInterval(() => document.visibilityState !== "hidden" && void load(), 5 * REFRESH_MS);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [week]);
   useEffect(() => {
     fetchLines().then((l) => setLines(new Map(l.map((x) => [x.id, x]))), () => {});
   }, []);
@@ -119,6 +133,10 @@ export function StablingPanel() {
   const nowMin = Math.floor(now / 60_000) * 60_000;
   const relations = useMemo(() => findRelations(allStays, windowMin, nowMin), [allStays, windowMin, nowMin]);
   const relByStay = useMemo(() => relationsByStay(relations), [relations]);
+  const hist = history?.week === week ? history : null;
+  // Woche und Verlauf zusammen, jede Abstellung einmal (gleicher Schlüssel)
+  const historyStays = useMemo(() => toStays([...(hist?.entries ?? []), ...(log?.earlier ?? []), ...(log?.entries ?? []), ...(log?.later ?? [])]), [hist, log]);
+  const recurring = useMemo(() => recurringSlots(historyStays, recurTol, recurMinWeeks), [historyStays, recurTol, recurMinWeeks]);
   const lineStyle: LineStyleFn = useCallback((id) => ({ color: lineColor(lines, id), textColor: lineTextColor(lines, id) }), [lines]);
 
   const goWeek = (w: string) => {
@@ -145,6 +163,8 @@ export function StablingPanel() {
   const props: ViewProps = {
     week, days, today, now, stays, allStays, relations, relByStay, windowMin, setWindowMin, marks, notes,
     selected, select: setSelected, lineStyle, goTo, day, night, nightHours, setNightHours,
+    recur: recurring.byStay, recurSlots: recurring.slots, recurTol, setRecurTol, recurMinWeeks, setRecurMinWeeks,
+    historyRange: hist ? { from: hist.from, to: hist.to } : null,
   };
   const [wa, wb] = weekRange(week);
   const inW = (t: number) => t >= wa && t < wb;
@@ -193,6 +213,7 @@ export function StablingPanel() {
               <Stat k="Abstellungen" v={stays.length} />
               <Stat k="steht noch" v={standing} color={C.standing} />
               <Stat k="gleichzeitig abgestellt (A)" v={new Set(weekRel.filter((r) => r.category === "A").flatMap((r) => [r.a.key, r.b.key])).size} color={C.overlap} title="Abstellungen mit tatsächlicher Überschneidung am selben Standort" />
+              <Stat k="wiederkehrend" v={stays.filter((s) => recurring.byStay.has(s.key)).length} color={C.recur} title="Abstellungen, die sich am selben Ort, Wochentag und zu ähnlicher Uhrzeit in mehreren Wochen wiederholen" />
               <Stat k="markiert stehend" v={markedStanding} color={C.marked} />
               <Stat k="nach Plochingen verschoben" v={log.moved} title="Fahrzeuge, nicht im Protokoll" />
             </dl>
@@ -249,6 +270,7 @@ export function StablingPanel() {
             <li>Fährt ein abgestellter Zug als Nächstes an einem anderen Bahnhof los, gilt er als dorthin überführt und dort abgestellt (Symbol ↪). Wann und wie er dorthin kam, ist nicht bekannt (Annahme).</li>
             <li>Jede Abstellung ist nur einmal gespeichert. Woche, Tag, Nacht, Protokoll und Analyse zeigen Ausschnitte derselben Einträge. Unbekannte Enden werden nicht erfunden: Offene Balken reichen bis jetzt (höchstens 48 h) und sind schraffiert.</li>
             <li>Zusammenhänge beruhen nur auf Abstellzeiten am selben Standort, nicht auf Fahrten. A = nachweislich gleichzeitig abgestellt, B = zeitlich nahe oder wegen unbekannter Zeiten nur möglich. Standortübergreifend wird nur dasselbe Fahrzeug verknüpft.</li>
+            <li>↻ wiederkehrend: Am selben Abstellort wurde am selben Wochentag zu ähnlicher Uhrzeit (Standard ±60 min) in mehreren Wochen ein Zug abgestellt, egal welcher Zug oder welches Fahrzeug. Verglichen werden bis zu 8 Wochen davor und danach.</li>
             <li>Notizen sind eigene Angaben und werden nie als Zugbewegung gewertet.</li>
             <li>Nicht im Protokoll: Züge, die nach 48 h (Schwabstraße 60 min) automatisch nach Plochingen verschoben wurden. Ohne Scans entsteht kein Eintrag. Lücken in der Nacht schließt der Zeitplan im <Link href="/scanner" className="text-fg underline decoration-white/30 underline-offset-2">Scanner</Link>.</li>
           </ul>

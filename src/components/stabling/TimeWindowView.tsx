@@ -8,7 +8,7 @@ import { useMemo } from "react";
 import { addDays, dayKey, dayStart, fmtDay } from "@/lib/stabling";
 import { dayRange, nightSpan, notesInRange, segmentsIn, staysAtNote, weekdayOf, weekNights, WEEKDAYS, WEEKDAYS_SHORT, type NoteAt, type Range, type Seg } from "@/lib/stablingModel";
 import { fmtTime } from "@/lib/time";
-import { blockBackground, blockRing, C, durationText, endText, Legend, NoteMark, RelBadge, startText, TransferMark, Vehicles, type ViewProps } from "./shared";
+import { blockBackground, blockRing, C, durationText, endText, Legend, NoteMark, RecurBadge, RelBadge, startText, TransferMark, Vehicles, type ViewProps } from "./shared";
 import { FilterBar, H, stayTitle, useScrollToSelected, useStayFilter } from "./TimeShared";
 
 const NIGHT_FROM: [number, string][] = [
@@ -203,7 +203,7 @@ export function TimeWindowView(p: ViewProps & { mode: "tag" | "nacht" }) {
           </>
         )}
         <div className="mt-4 border-t border-line pt-3">
-          <Legend parts={["status", "marked", "rel", "note", "transfer"]} />
+          <Legend parts={["status", "marked", "rel", "recur", "note", "transfer"]} />
         </div>
       </div>
     </section>
@@ -238,6 +238,7 @@ function Row({ s, p, x, ticks, notes, nowAt, withDay }: { s: Seg; p: ViewProps; 
             </span>
             {nA > 0 && <RelBadge category="A" count={nA} />}
             {nB > 0 && <RelBadge category="B" count={nB} />}
+            {p.recur.get(stay.key) && <RecurBadge slot={p.recur.get(stay.key)!} compact />}
           </span>
           <span className="tnum shrink-0 text-right text-muted max-sm:text-left">
             {start} – {end}

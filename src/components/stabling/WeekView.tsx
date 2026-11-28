@@ -172,7 +172,7 @@ export function WeekView(p: ViewProps) {
         </div>
       </div>
 
-      <Legend parts={["status", "marked", "rel", "note", "transfer"]} />
+      <Legend parts={["status", "marked", "rel", "recur", "note", "transfer"]} />
       <p className="text-[12px] text-faint">
         ☾ Mo → Di usw.: Nachtübersicht {String((24 + p.nightHours[0]) % 24).padStart(2, "0")}:00–{String(p.nightHours[1]).padStart(2, "0")}:00 Uhr. Hellere Fläche oben in jeder Spalte = 00–06 Uhr.
         Offene Enden reichen bis jetzt (höchstens 48 h) und sind schraffiert.
@@ -191,6 +191,7 @@ function Block({ s, y, lane, p }: { s: Seg; y: (t: number) => number; lane: { la
   const rels = p.relByStay.get(stay.key) ?? [];
   const relA = rels.some((r) => r.category === "A");
   const relB = !relA && rels.length > 0;
+  const slot = p.recur.get(stay.key);
   const roomy = h >= 30 && lane.lanes <= 2;
   const some = h >= 15 && lane.lanes <= 2;
   const vertical = !roomy && !some && h >= 52 && lane.lanes <= 5;
@@ -233,6 +234,14 @@ function Block({ s, y, lane, p }: { s: Seg; y: (t: number) => number; lane: { la
       {roomy && h >= 44 && (
         <span className="mx-[2px] block max-w-[calc(100%-4px)] truncate rounded-[3px] px-[3px] text-[10px]" style={text}>
           {stay.stationName}
+        </span>
+      )}
+      {slot && (
+        <span aria-hidden className="absolute inset-y-0 left-0 w-[3px]" style={{ background: C.recur }} />
+      )}
+      {slot && h >= 15 && lane.lanes <= 3 && (
+        <span aria-hidden className="tnum absolute right-[2px] top-[2px] rounded-[3px] px-[3px] text-[9.5px] font-bold leading-[13px]" style={{ background: "#0b0d10", color: C.recur }}>
+          ↻{slot.weeks.length}
         </span>
       )}
       {(relA || relB) && (

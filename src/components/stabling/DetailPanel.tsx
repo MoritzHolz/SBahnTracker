@@ -3,10 +3,10 @@
 /** Details einer Abstellung: von jeder Ansicht aus geöffnet, verbindet Woche, Tag, Nacht, Protokoll und Analyse. */
 import { useEffect } from "react";
 import { LineBadge } from "@/components/ui/Badges";
-import { addDays, dayKey, fmtDay } from "@/lib/stabling";
-import { drawEnd, nightSpan, notesOn, staysAtNote, type Stay } from "@/lib/stablingModel";
+import { addDays, dayKey, fmtDay, weekNumber, weekOf } from "@/lib/stabling";
+import { drawEnd, nightSpan, notesOn, slotLabel, staysAtNote, type Stay } from "@/lib/stablingModel";
 import { fmtTime } from "@/lib/time";
-import { C, durationText, endText, fmtGap, MarkButton, NoteMark, RelBadge, startText, STATUS, statusOf, Swatch, TransferMark, Vehicles, type ViewProps } from "./shared";
+import { C, durationText, endText, fmtGap, MarkButton, NoteMark, RecurBadge, RelBadge, startText, STATUS, statusOf, Swatch, TransferMark, Vehicles, type ViewProps } from "./shared";
 
 const WD = new Intl.DateTimeFormat("de-DE", { timeZone: "Europe/Berlin", weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" });
 
@@ -27,6 +27,7 @@ export function DetailPanel(p: ViewProps & { stay: Stay; onClose: () => void }) 
   const st = STATUS[statusOf(s)];
   const rels = relByStay.get(s.key) ?? [];
   const nights = nightsOf(s, now, p.nightHours);
+  const slot = p.recur.get(s.key);
   const end = drawEnd(s, now);
   const noteHits = [];
   for (let k = dayKey(s.start); k <= dayKey(end); k = addDays(k, 1)) {
@@ -160,6 +161,33 @@ export function DetailPanel(p: ViewProps & { stay: Stay; onClose: () => void }) 
             </ul>
           )}
         </section>
+
+        {slot && (
+          <section className="mt-4">
+            <h3 className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.12em] text-faint">
+              Wiederkehrend <RecurBadge slot={slot} compact />
+            </h3>
+            <p className="mt-1.5 text-[12.5px] text-muted">
+              In {slot.weeks.length} Wochen wurde hier {slotLabel(slot)} ein Zug abgestellt (Uhrzeit ±{p.recurTol} min, Zug und Fahrzeug egal).
+            </p>
+            <ul className="mt-1.5 space-y-1">
+              {slot.stays.map((o) => (
+                <li key={o.key}>
+                  <button
+                    onClick={() => (o.key === s.key ? undefined : goTo("woche", { day: dayKey(o.start), key: o.key }))}
+                    aria-current={o.key === s.key || undefined}
+                    className={`flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-[12.5px] hover:bg-white/[0.05] ${o.key === s.key ? "bg-white/[0.07]" : ""}`}
+                  >
+                    <span className="tnum w-12 shrink-0 text-faint">KW {weekNumber(weekOf(dayKey(o.start)))}</span>
+                    <span className="tnum w-24 shrink-0">{fmtDay(o.start)} {fmtTime(o.start)}</span>
+                    <span className="min-w-0 truncate"><Vehicles ids={o.vehicles} marks={marks} link={false} /></span>
+                    {o.key === s.key && <span className="ml-auto shrink-0 text-[11px] text-faint">diese</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {noteHits.length > 0 && (
           <section className="mt-4">

@@ -5,7 +5,7 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import type { Marks, Notes } from "@/hooks/useStablingUser";
 import { fmtDay, fmtStay } from "@/lib/stabling";
-import { stayDuration, type Relation, type Stay } from "@/lib/stablingModel";
+import { slotLabel, stayDuration, type RecurSlot, type Relation, type Stay } from "@/lib/stablingModel";
 import { fmtTime } from "@/lib/time";
 
 // ------------------------------------------------------------------ Farben (überall dieselbe Bedeutung)
@@ -25,6 +25,8 @@ export const C = {
   near: "#fdba74",
   /** Standortnotiz (keine Zugbewegung) */
   note: "#7dd3fc",
+  /** wiederkehrend: gleicher Ort, gleicher Wochentag, ähnliche Uhrzeit in mehreren Wochen */
+  recur: "#a3e635",
 } as const;
 
 export type StayStatus = "abgefahren" | "eingegrenzt" | "steht" | "unbekannt";
@@ -164,6 +166,16 @@ export function RelBadge({ category, count, title }: { category: Relation["categ
   );
 }
 
+/** Kennzeichen „wiederkehrend“: am selben Ort, Wochentag und ähnlicher Uhrzeit in mehreren Wochen */
+export function RecurBadge({ slot, compact = false }: { slot: RecurSlot; compact?: boolean }) {
+  const t = `Wiederkehrend: ${slot.stationName}, ${slotLabel(slot)} – in ${slot.weeks.length} Wochen abgestellt`;
+  return (
+    <span title={t} aria-label={t} role="img" className="inline-flex h-5 shrink-0 items-center gap-0.5 rounded-[4px] px-1.5 text-[11px] font-semibold leading-none" style={{ background: `${C.recur}24`, color: C.recur }}>
+      ↻<span className="tnum">{slot.weeks.length}{compact ? "" : " Wo."}</span>
+    </span>
+  );
+}
+
 /** Notiz-Kennzeichen (keine Zugbewegung) */
 export function NoteMark({ title }: { title: string }) {
   return (
@@ -174,7 +186,7 @@ export function NoteMark({ title }: { title: string }) {
 }
 
 /** Legende mit allen Farben; nur die genannten Teile */
-export function Legend({ parts = ["status", "marked", "rel", "note"] }: { parts?: ("status" | "marked" | "rel" | "note" | "transfer")[] }) {
+export function Legend({ parts = ["status", "marked", "rel", "recur", "note"] }: { parts?: ("status" | "marked" | "rel" | "recur" | "note" | "transfer")[] }) {
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[12px] text-muted">
       {parts.includes("status") &&
@@ -197,6 +209,11 @@ export function Legend({ parts = ["status", "marked", "rel", "note"] }: { parts?
             <RelBadge category="B" /> zeitlich nahe / möglich
           </span>
         </>
+      )}
+      {parts.includes("recur") && (
+        <span className="flex items-center gap-1.5">
+          <span className="inline-flex h-5 items-center rounded-[4px] px-1.5 text-[11px] font-semibold" style={{ background: `${C.recur}24`, color: C.recur }}>↻3</span> wiederkehrend (Woche für Woche)
+        </span>
       )}
       {parts.includes("note") && (
         <span className="flex items-center gap-1.5">
@@ -256,4 +273,14 @@ export interface ViewProps {
   /** Nachtfenster in Stunden relativ zu Mitternacht (Standard 0 bis 6) */
   nightHours: [number, number];
   setNightHours: (h: [number, number]) => void;
+  /** Wiederkehrende Abstellungen (gleicher Ort, Wochentag, ähnliche Uhrzeit) aus den umliegenden Wochen */
+  recur: Map<string, RecurSlot>;
+  recurSlots: RecurSlot[];
+  /** Toleranz der Uhrzeit in Minuten und Mindestzahl Wochen */
+  recurTol: number;
+  setRecurTol: (m: number) => void;
+  recurMinWeeks: number;
+  setRecurMinWeeks: (n: number) => void;
+  /** geladene Wochen für den Vergleich (Montage), null solange geladen wird */
+  historyRange: { from: string; to: string } | null;
 }

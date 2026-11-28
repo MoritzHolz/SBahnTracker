@@ -81,6 +81,18 @@ export async function fetchStablingWeek(week: string): Promise<StablingWeek> {
   return { week, moved: cur.moved, entries: cur.entries, earlier: prev.entries, later: next.entries };
 }
 
+/** Wochen vor und nach der gezeigten Woche, die für wiederkehrende Abstellungen geladen werden */
+export const HISTORY_WEEKS = 8;
+
+/** Abstellungen der umliegenden Wochen (ab FIRST_WEEK, höchstens bis heute) für den Vergleich Woche für Woche */
+export async function fetchStablingHistory(week: string, now: number): Promise<{ from: string; to: string; entries: StablingEntry[] }> {
+  const fromWeek = addDays(week, -7 * HISTORY_WEEKS) < FIRST_WEEK ? FIRST_WEEK : addDays(week, -7 * HISTORY_WEEKS);
+  const toWeek = addDays(week, 7 * (HISTORY_WEEKS + 1));
+  const to = Math.min(dayStart(toWeek), now + 86_400_000);
+  const { entries } = await fetchRange(dayStart(fromWeek), to);
+  return { from: fromWeek, to: dayKey(to), entries };
+}
+
 export const entryKey = (e: StablingEntry) => `${e.station_id}|${e.service_date}|${e.line_id}|${e.train_number}|${e.vehicles.join()}`;
 
 const dayKeyFmt = new Intl.DateTimeFormat("sv-SE", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" });

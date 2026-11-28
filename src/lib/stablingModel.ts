@@ -9,7 +9,7 @@
  * - Zusammenhänge stützen sich nur auf Abstellzeiträume, nie auf normale Fahrten. Kategorie A = Zeiträume überschneiden
  *   sich nachweislich, Kategorie B = nur zeitlich nahe oder Überschneidung wegen unbekannter Zeiten nur möglich.
  */
-import { addDays, dayKey, dayStart, entryKey, weekDays, type StablingEntry } from "./stabling";
+import { addDays, dayKey, dayStart, entryKey, weekDays, weekOf, type StablingEntry } from "./stabling";
 
 const H = 3_600_000;
 const MIN = 60_000;
@@ -350,35 +350,85 @@ export function vehicleRuns(stays: Stay[]): VehicleRun[] {
   return out.sort((a, b) => b.stays.length - a.stays.length || a.vehicle.localeCompare(b.vehicle, "de"));
 }
 
-export interface Pattern {
-  station: string;
-  stationName: string;
-  line: string;
-  train: string;
-  stays: Stay[];
-  days: string[];
-  /** Ankunft an allen Tagen innerhalb von 60 min Tageszeit */
-  sameTime: boolean;
+// ------------------------------------------------------------------ Wiederkehrende Abstellungen über mehrere Wochen
+
+/** Minute der Woche in deutscher Zeit (Montag 00:00 = 0) */
+export function minuteOfWeek(t: number): number {
+  const k = dayKey(t);
+  return (weekdayOf(k) - 1) * 1440 + Math.round((t - dayStart(k)) / MIN);
 }
 
-/** Wiederkehrend: derselbe Zug (Linie + Zugnummer der Ankunft) an mindestens zwei Tagen am selben Standort abgestellt */
-export function patterns(stays: Stay[]): Pattern[] {
-  const m = new Map<string, Stay[]>();
-  for (const s of stays) {
+export interface RecurSlot {
+  id: string;
+  station: string;
+  stationName: string;
+  /** Abstellungen dieses Zeitfensters aus allen geladenen Wochen, zeitlich sortiert */
+  stays: Stay[];
+  /** Montage der Wochen, in denen es vorkam */
+  weeks: string[];
+  /** typische Ankunft (Median) und Spanne, als Minute der Woche */
+  typical: number;
+  earliest: number;
+  latest: number;
+}
+
+export const RECUR_TOLERANCE = [30, 60, 120] as const;
+
+/**
+ * Wiederkehrend = am selben Abstellort, am selben Wochentag, zu einer ähnlichen Ankunftszeit in mehreren Wochen.
+ * Zug- und Fahrzeugnummer spielen keine Rolle. Ein Zeitfenster ist höchstens 2 × Toleranz breit (sonst würde eine
+ * Kette von Abstellungen im Abstand der Toleranz den ganzen Tag zusammenziehen). Überführte Zeilen (Ankunft unbekannt)
+ * zählen nicht mit.
+ */
+export function recurringSlots(history: Stay[], toleranceMin: number, minWeeks = 2): { slots: RecurSlot[]; byStay: Map<string, RecurSlot> } {
+  const byStation = new Map<string, { s: Stay; m: number }[]>();
+  for (const s of history) {
     if (s.startKind !== "exact") continue;
-    const k = `${s.station}|${s.entry.line_id}|${s.entry.train_number}`;
-    m.set(k, [...(m.get(k) ?? []), s]);
+    byStation.set(s.station, [...(byStation.get(s.station) ?? []), { s, m: minuteOfWeek(s.start) }]);
   }
-  const out: Pattern[] = [];
-  for (const list of m.values()) {
-    const days = [...new Set(list.map((s) => dayKey(s.start)))].sort();
-    if (days.length < 2) continue;
-    const tod = list.map((s) => (s.start - dayStart(dayKey(s.start))) / MIN);
-    const spread = Math.min(Math.max(...tod) - Math.min(...tod), Math.max(...tod.map((t) => (t + 720) % 1440)) - Math.min(...tod.map((t) => (t + 720) % 1440)));
-    const s0 = list[0];
-    out.push({ station: s0.station, stationName: s0.stationName, line: s0.entry.line_id, train: s0.entry.train_number, stays: list.sort(byStart), days, sameTime: spread <= 60 });
+  const slots: RecurSlot[] = [];
+  for (const list of byStation.values()) {
+    list.sort((a, b) => a.m - b.m || a.s.start - b.s.start);
+    let cur: { s: Stay; m: number }[] = [];
+    const flush = () => {
+      const weeks = [...new Set(cur.map((x) => weekOf(dayKey(x.s.start))))].sort();
+      if (cur.length && weeks.length >= minWeeks) {
+        const ms = cur.map((x) => x.m).sort((a, b) => a - b);
+        const first = cur[0].s;
+        slots.push({
+          id: `${first.station}@${ms[0]}`,
+          station: first.station,
+          stationName: first.stationName,
+          stays: cur.map((x) => x.s).sort(byStart),
+          weeks,
+          typical: ms[Math.floor((ms.length - 1) / 2)],
+          earliest: ms[0],
+          latest: ms[ms.length - 1],
+        });
+      }
+      cur = [];
+    };
+    for (const x of list) {
+      if (cur.length && x.m - cur[0].m > 2 * toleranceMin) flush();
+      cur.push(x);
+    }
+    flush();
   }
-  return out.sort((a, b) => b.days.length - a.days.length || a.stationName.localeCompare(b.stationName, "de"));
+  slots.sort((a, b) => b.weeks.length - a.weeks.length || a.typical - b.typical || a.stationName.localeCompare(b.stationName, "de"));
+  const byStay = new Map<string, RecurSlot>();
+  for (const sl of slots) for (const s of sl.stays) byStay.set(s.key, sl);
+  return { slots, byStay };
+}
+
+const hhmm = (m: number) => `${String(Math.floor((m % 1440) / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+
+/** „Mo ca. 23:40“ bzw. für 00–06 Uhr „Nacht So → Mo, ca. 01:10“ */
+export function slotLabel(sl: RecurSlot): string {
+  const d = Math.floor(sl.typical / 1440);
+  const t = sl.typical % 1440;
+  const span = sl.latest - sl.earliest >= 5 ? ` (${hhmm(sl.earliest)}–${hhmm(sl.latest)})` : "";
+  if (t < 6 * 60) return `Nacht ${WEEKDAYS_SHORT[(d + 6) % 7]} → ${WEEKDAYS_SHORT[d]}, ca. ${hhmm(t)}${span}`;
+  return `${WEEKDAYS_SHORT[d]} ca. ${hhmm(t)}${span}`;
 }
 
 // ------------------------------------------------------------------ Standortnotizen
