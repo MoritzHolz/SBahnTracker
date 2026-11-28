@@ -102,6 +102,8 @@ Das Collector-Secret liegt in `private.app_config` (nicht über die API lesbar) 
 | `stabling_sites` | Lage der Abstellgleise je Endstation (OpenStreetMap) |
 | `stabling_rules` | Mindeststandzeit und Frist bis zum Verschieben je Bahnhof (`*` = alle) |
 | `stabling_events` | Abstellprotokoll je Fahrzeug, eindeutig über (Fahrzeug, Betriebstag, Linie, Zugnummer) |
+| `station_notes` | eigene Notizen je Standort und Wochentag (optional mit Uhrzeit), für alle freigeschalteten Konten |
+| `marked_vehicles` | markierte Fahrzeuge je Konto |
 | `parking_estimates` | vermuteter Abstellort/Status mit Konfidenz und Begründung |
 | `collector_runs` | Protokoll jedes Sammellaufs |
 
@@ -199,6 +201,10 @@ Verschieben ändert nur den geschätzten Ort (`moved_at`, `moved_from_name`), es
 - Schwabstraße: laut Plan kürzere Wenden als 15 min (also nur verspätete) zählen nie als Abstellung.
 - Aufzeichnung ab `private.app_config.stabling_log_from`. Die Zeit vor dem 25.11.2026, 14:35 Uhr wurde einmalig aus den vorhandenen Scans nachgerechnet (`20261125180000_stabling_log_accuracy.sql`).
 - Die Seite zeigt eine Woche (Mo–So) und blättert bis `FIRST_WEEK` zurück.
+- Ansichten (`src/components/stabling/`): Woche (Spalten Mo–So, Zeitachse, Übergänge öffnen die Nacht), Tag, Nacht (Abend → Folgetag, Standard 00–06 Uhr, einstellbar), Protokoll (Filter, Liste/Nach Bahnhof/Chronik), Analyse, Markiert, Notizen. Ein Klick auf eine Abstellung öffnet dieselben Details in jeder Ansicht.
+- Alle Ansichten rechnen aus denselben Einträgen (`src/lib/stablingModel.ts`, Tests in `stablingModel.test.ts`). Tag, Nacht und Woche sind nur Zeitfenster; es entstehen keine zusätzlichen Datensätze. Unbekannte Enden werden nicht erfunden, offene Balken reichen bis jetzt (höchstens 48 h) und sind schraffiert.
+- Zusammenhänge nur aus Abstellzeiten am selben Standort: A = nachweislich gleichzeitig abgestellt, B = innerhalb des Zeitfensters (15/30/60 min) nacheinander oder Überschneidung wegen unbekannter Zeit nur möglich. Standortübergreifend wird nur dasselbe Fahrzeug verknüpft (Fahrzeug-Umläufe).
+- Notizen und Markierungen werden nie als Zugbewegung gewertet. „Aktuell“ heißt bei markierten Fahrzeugen: letzte Sichtung jünger als 20 min, sonst „zuletzt bekannt“.
 
 ## Kosten
 

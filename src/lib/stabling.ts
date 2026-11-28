@@ -70,12 +70,27 @@ export interface StablingWeek {
   entries: StablingEntry[];
   /** in der Woche davor abgestellt (für Standzeiten über den Wochenwechsel) */
   earlier: StablingEntry[];
+  /** am Montag danach bis 12 Uhr abgestellt (für die Nacht So → Mo) */
+  later: StablingEntry[];
 }
 
 export async function fetchStablingWeek(week: string): Promise<StablingWeek> {
   const a = dayStart(week);
-  const [cur, prev] = await Promise.all([fetchRange(a, dayStart(addDays(week, 7))), fetchRange(dayStart(addDays(week, -7)), a)]);
-  return { week, moved: cur.moved, entries: cur.entries, earlier: prev.entries };
+  const b = dayStart(addDays(week, 7));
+  const [cur, prev, next] = await Promise.all([fetchRange(a, b), fetchRange(dayStart(addDays(week, -7)), a), fetchRange(b, b + 12 * 3_600_000)]);
+  return { week, moved: cur.moved, entries: cur.entries, earlier: prev.entries, later: next.entries };
+}
+
+/** Wochen vor und nach der gezeigten Woche, die für wiederkehrende Abstellungen geladen werden */
+export const HISTORY_WEEKS = 8;
+
+/** Abstellungen der umliegenden Wochen (ab FIRST_WEEK, höchstens bis heute) für den Vergleich Woche für Woche */
+export async function fetchStablingHistory(week: string, now: number): Promise<{ from: string; to: string; entries: StablingEntry[] }> {
+  const fromWeek = addDays(week, -7 * HISTORY_WEEKS) < FIRST_WEEK ? FIRST_WEEK : addDays(week, -7 * HISTORY_WEEKS);
+  const toWeek = addDays(week, 7 * (HISTORY_WEEKS + 1));
+  const to = Math.min(dayStart(toWeek), now + 86_400_000);
+  const { entries } = await fetchRange(dayStart(fromWeek), to);
+  return { from: fromWeek, to: dayKey(to), entries };
 }
 
 export const entryKey = (e: StablingEntry) => `${e.station_id}|${e.service_date}|${e.line_id}|${e.train_number}|${e.vehicles.join()}`;
