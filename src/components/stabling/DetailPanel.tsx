@@ -134,6 +134,16 @@ export function DetailPanel(p: ViewProps & { stay: Stay; onClose: () => void }) 
           ))}
           <button className={btn} onClick={() => goTo("protokoll", { key: s.key })}>Im Protokoll</button>
         </div>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {s.vehicles.map((v) => (
+            <button key={v} className={btn} onClick={() => p.openTarget({ kind: "fahrzeug", id: v, label: v })}>
+              Alle Abstellungen von {v}
+            </button>
+          ))}
+          <button className={btn} onClick={() => p.openTarget({ kind: "ort", id: s.station, label: s.stationName })}>
+            Standort {s.stationName} auswerten
+          </button>
+        </div>
 
         <section className="mt-4">
           <h3 className="text-[10px] font-medium uppercase tracking-[0.12em] text-faint">Zusammenhänge am Standort</h3>
