@@ -210,11 +210,14 @@ export interface Relation {
 export const WINDOW_CHOICES = [15, 30, 60] as const;
 
 const shares = (a: Stay, b: Stay) => a.vehicles.some((v) => b.vehicles.includes(v));
+/** gleicher Betriebstag und gleiche Zugnummer: Teile desselben Zuges (z. B. Doppeltraktion, getrennt erfasst) */
+export const sameTrain = (a: Stay, b: Stay) =>
+  !!a.entry.train_number && a.entry.train_number === b.entry.train_number && a.entry.service_date === b.entry.service_date;
 const hm = (t: number) => new Intl.DateTimeFormat("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" }).format(t);
 
 /**
  * Überschneidungen und zeitliche Nähe von Abstellungen am selben Standort. Normale Fahrten fließen nicht ein.
- * Paare mit gemeinsamem Fahrzeug sind keine zwei Züge und werden übersprungen.
+ * Paare mit gemeinsamem Fahrzeug oder gleicher Zugnummer am selben Tag sind keine zwei Züge und werden übersprungen.
  */
 export function findRelations(stays: Stay[], windowMin: number, now: number): Relation[] {
   const byStation = new Map<string, Stay[]>();
@@ -227,7 +230,7 @@ export function findRelations(stays: Stay[], windowMin: number, now: number): Re
       for (let j = i + 1; j < list.length; j++) {
         const a = list[i];
         const b = list[j];
-        if (shares(a, b)) continue;
+        if (shares(a, b) || sameTrain(a, b)) continue;
         const base = { id: `${a.key}~${b.key}`, a, b, station: a.station, stationName: a.stationName };
         // A: beide nachweislich gleichzeitig da
         const lo = Math.max(presentFrom(a), presentFrom(b));
