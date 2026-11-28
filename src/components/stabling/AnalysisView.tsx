@@ -343,7 +343,7 @@ function ChainCard(p: ViewProps & { chain: Chain }) {
   const mid = (i: number) => i * ROW + ROW / 2;
   const height = rows.length * ROW;
   const ticks = [lo, lo + (hi - lo) / 2, hi];
-  const groups = useMemo(() => groupLinks(chain.links), [chain.links]);
+  const groups = useMemo(() => groupLinks(chain.stays, chain.links), [chain.stays, chain.links]);
   // gezählt wie angezeigt: Teile desselben Zuges zählen einmal
   const shown = groups.flatMap((g) => g.partners);
   const nA = shown.filter((x) => x.rel.category === "A").length;
@@ -439,7 +439,7 @@ function ChainCard(p: ViewProps & { chain: Chain }) {
       </ul>
       {groups.length > LINK_LIMIT && (
         <button onClick={() => setOpen(!open)} aria-expanded={open} className="h-9 w-full border-t border-line text-[12.5px] text-muted hover:bg-white/[0.04] hover:text-fg compact:h-11">
-          {open ? "Weniger anzeigen" : `Alle ${groups.length} Abstellungen mit Zusammenhängen anzeigen`}
+          {open ? "Weniger anzeigen" : `Alle ${groups.length} Züge anzeigen`}
         </button>
       )}
     </article>
@@ -447,32 +447,38 @@ function ChainCard(p: ViewProps & { chain: Chain }) {
 }
 
 interface Partner {
-  /** alle Abstellungen desselben Zuges (gleicher Tag, gleiche Zugnummer) */
+  /** Partnerzug (alle seine Abstellungen: gleicher Tag, gleiche Zugnummer) */
   stays: Stay[];
   rel: Relation;
 }
 interface LinkGroup {
-  /** Abstellungen desselben Zuges, zu denen die Zusammenhänge gehören */
+  /** Abstellungen desselben Zuges, z. B. ein Doppelzug, der getrennt abgeholt wurde */
   leads: Stay[];
+  /** Zusammenhänge mit später abgestellten Zügen (jeder Zusammenhang steht nur einmal, beim früheren Zug) */
   partners: Partner[];
 }
 
+const trainKey = (s: Stay) => (s.entry.train_number ? `${s.entry.service_date}|${s.entry.train_number}` : s.key);
+
 /**
- * Jede Abstellung erscheint nur einmal als Kopfzeile: Zusammenhänge hängen an der früher begonnenen Abstellung.
- * Partner mit gleichem Tag und gleicher Zugnummer werden zu einem Eintrag zusammengefasst, ebenso Kopfzeilen.
+ * Eine Zeile je Zug: Jedes Fahrzeug erscheint genau einmal. Doppelzüge (gleicher Tag, gleiche Zugnummer) stehen
+ * zusammen. Zusammenhänge stehen beim früher abgestellten Zug und nennen den anderen nur mit seiner Zugnummer.
  */
-function groupLinks(links: Relation[]): LinkGroup[] {
-  const trainKey = (s: Stay) => (s.entry.train_number ? `${s.entry.service_date}|${s.entry.train_number}` : s.key);
+function groupLinks(stays: Stay[], links: Relation[]): LinkGroup[] {
   const groups = new Map<string, LinkGroup>();
+  for (const s of [...stays].sort((a, b) => a.start - b.start)) {
+    const g = groups.get(trainKey(s)) ?? { leads: [], partners: [] };
+    groups.set(trainKey(s), g);
+    g.leads.push(s);
+  }
   for (const r of links) {
-    const lk = trainKey(r.a);
-    const g = groups.get(lk) ?? { leads: [], partners: [] };
-    groups.set(lk, g);
-    if (!g.leads.includes(r.a)) g.leads.push(r.a);
+    const g = groups.get(trainKey(r.a));
     const pk = trainKey(r.b);
-    const hit = g.partners.find((x) => trainKey(x.stays[0]) === pk && x.rel.kind === r.kind);
-    if (!hit) g.partners.push({ stays: [r.b], rel: r });
-    else if (!hit.stays.includes(r.b)) hit.stays.push(r.b);
+    if (!g || pk === trainKey(r.a)) continue;
+    const hit = g.partners.find((x) => trainKey(x.stays[0]) === pk);
+    if (!hit) g.partners.push({ stays: groups.get(pk)?.leads ?? [r.b], rel: r });
+    // A (nachweislich gleichzeitig) geht vor B (nur möglich)
+    else if (r.category === "A" && hit.rel.category !== "A") hit.rel = r;
   }
   return [...groups.values()];
 }
@@ -481,20 +487,11 @@ function RelationGroup(p: ViewProps & { g: LinkGroup }) {
   const { g, now, marks, select, lineStyle, selected } = p;
   const s = g.leads[0];
   const sub = (x: Stay) => (
-    <span className="tnum block text-[12px] text-muted">
+    <span className="tnum text-[12px] text-muted">
       {startText(x)} – {endText(x, now)} · {durationText(x, now)}
     </span>
   );
-  /** Zeiten einmal zeigen, wenn alle gleich sind, sonst je Fahrzeug */
-  const times = (list: Stay[]) =>
-    list.every((x) => x.start === list[0].start && x.end === list[0].end)
-      ? sub(list[0])
-      : list.map((x) => (
-          <span key={x.key} className="flex flex-wrap gap-x-1.5">
-            <span className="tnum text-[12px] text-faint">{x.vehicles.join(" + ")}:</span>
-            {sub(x)}
-          </span>
-        ));
+  const same = g.leads.every((x) => x.start === s.start && x.end === s.end);
   return (
     <li className="px-4 py-2.5 text-[13px]">
       <button
@@ -504,40 +501,44 @@ function RelationGroup(p: ViewProps & { g: LinkGroup }) {
       >
         <span className="flex flex-wrap items-center gap-1.5">
           <TransferMark s={s} />
-          <Vehicles ids={g.leads.flatMap((x) => x.vehicles)} marks={marks} link={false} />
+          <span className="tnum text-[13px] font-semibold">Zug {s.entry.train_number}</span>
           <LineBadge id={s.entry.line_id} {...lineStyle(s.entry.line_id)} size="sm" />
-          <span className="tnum text-[12px] text-faint">Zug {s.entry.train_number}</span>
+          {g.leads.length > 1 && (
+            <span className="text-[11.5px] text-faint">
+              {g.leads.length === 2 ? "Doppelzug" : `${g.leads.length} Fahrzeuggruppen`}
+              {!same && (g.leads.every((x) => x.endKind === "exact") ? ", getrennt abgeholt" : ", später getrennt")}
+            </span>
+          )}
         </span>
-        {times(g.leads)}
+        {same ? (
+          <span className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
+            <Vehicles ids={g.leads.flatMap((x) => x.vehicles)} marks={marks} link={false} />
+            {sub(s)}
+          </span>
+        ) : (
+          g.leads.map((x) => (
+            <span key={x.key} className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
+              <Vehicles ids={x.vehicles} marks={marks} link={false} />
+              {sub(x)}
+            </span>
+          ))
+        )}
       </button>
-      <ul className="mt-1 space-y-1 border-l border-line pl-3 sm:ml-2">
-        {g.partners.map(({ stays, rel: r }) => {
-          const o = stays[0];
-          return (
-            <li key={r.id}>
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-2 pt-1 text-[12px]" title={r.reason}>
-                <RelBadge category={r.category} />
-                <span className="font-medium" style={{ color: r.category === "A" ? C.overlap : C.near }}>{KIND_TEXT[r.kind]}</span>
-                <span className="tnum text-muted">{r.kind === "follow" ? `Abstand ${fmtGap(r.gapMin)} (${fmtTime(r.from)} → ${fmtTime(r.to)})` : spanText(r.from, r.to)}</span>
-                <span className="text-faint">· {r.certainty}</span>
-              </div>
-              <button
-                onClick={() => select(o.key)}
-                className="w-full rounded-md px-2 py-1 text-left hover:bg-white/[0.05]"
-                style={blockRing(stays.some((x) => marks.anyMarked(x.vehicles)), stays.some((x) => selected === x.key))}
-              >
-                <span className="flex flex-wrap items-center gap-1.5">
-                  <TransferMark s={o} />
-                  <Vehicles ids={stays.flatMap((x) => x.vehicles)} marks={marks} link={false} />
-                  <LineBadge id={o.entry.line_id} {...lineStyle(o.entry.line_id)} size="sm" />
-                  <span className="tnum text-[12px] text-faint">Zug {o.entry.train_number}</span>
-                </span>
-                {times(stays)}
+      {g.partners.length > 0 && (
+        <ul className="mt-1 space-y-0.5 border-l border-line pl-3 sm:ml-2">
+          {g.partners.map(({ stays, rel: r }) => (
+            <li key={r.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-2 py-0.5 text-[12px]" title={r.reason}>
+              <RelBadge category={r.category} />
+              <span className="font-medium" style={{ color: r.category === "A" ? C.overlap : C.near }}>{KIND_TEXT[r.kind]}</span>
+              <span className="text-muted">mit</span>
+              <button onClick={() => select(stays[0].key)} className="tnum rounded px-1 font-medium underline decoration-white/30 underline-offset-2 hover:bg-white/[0.06]">
+                Zug {stays[0].entry.train_number}
               </button>
+              <span className="tnum text-muted">{r.kind === "follow" ? `Abstand ${fmtGap(r.gapMin)} (${fmtTime(r.from)} → ${fmtTime(r.to)})` : spanText(r.from, r.to)}</span>
             </li>
-          );
-        })}
-      </ul>
+          ))}
+        </ul>
+      )}
     </li>
   );
 }
