@@ -10,21 +10,26 @@ import { AnalysisView } from "@/components/stabling/AnalysisView";
 import { DetailPanel } from "@/components/stabling/DetailPanel";
 import { MarkedView } from "@/components/stabling/MarkedView";
 import { NotesView } from "@/components/stabling/NotesView";
+import { ProfileView, SearchBox } from "@/components/stabling/ProfileView";
 import { ProtocolView } from "@/components/stabling/ProtocolView";
 import { C, type LineStyleFn, type NavTarget, type View, type ViewProps } from "@/components/stabling/shared";
 import { TimeWindowView } from "@/components/stabling/TimeWindowView";
 import { WeekView } from "@/components/stabling/WeekView";
 import { DataBadge } from "@/components/ui/Badges";
 import { useNow } from "@/hooks/useLiveData";
+import { useScannerStatus } from "@/hooks/useScanner";
 import { useMarks, useStationNotes } from "@/hooks/useStablingUser";
 import { fetchLines, lineColor, lineTextColor, type Line } from "@/lib/api";
-import { addDays, dayKey, fetchStablingHistory, fetchStablingWeek, FIRST_WEEK, weekDays, weekLabel, weekOf, type StablingEntry, type StablingWeek } from "@/lib/stabling";
+import { addDays, dayKey, fetchStablingHistory, fetchStablingRecent, fetchStablingWeek, FIRST_WEEK, weekDays, weekLabel, weekOf, type StablingEntry, type StablingWeek } from "@/lib/stabling";
 import { findRelations, recurringSlots, relationsByStay, toStays, weekRange } from "@/lib/stablingModel";
+import { RANGES, searchables, type RangeDays, type Target, type TargetKind } from "@/lib/stablingProfile";
+import { fmtRelative, fmtTime } from "@/lib/time";
 import { AppNav } from "./StatusBar";
 
 const REFRESH_MS = 60_000;
 
 const VIEWS: [View, string][] = [
+  ["suche", "Suche"],
   ["woche", "Woche"],
   ["tag", "Tag"],
   ["nacht", "Nacht"],
@@ -41,7 +46,12 @@ function readUrl() {
   const q = new URLSearchParams(window.location.search);
   const v = q.get("ansicht");
   const d = (k: string) => (/^\d{4}-\d{2}-\d{2}$/.test(q.get(k) ?? "") ? q.get(k)! : undefined);
-  return { view: isView(v) ? v : undefined, week: d("woche"), day: d("tag"), night: d("nacht"), key: q.get("auswahl") ?? undefined };
+  const kinds: TargetKind[] = ["fahrzeug", "ort", "zug"];
+  const k = kinds.find((x) => q.get(x));
+  const target: Target | null = k ? { kind: k, id: q.get(k)!, label: q.get("name") ?? (k === "zug" ? `Zug ${q.get(k)}` : q.get(k)!) } : null;
+  const t = Number(q.get("tage"));
+  const range = (RANGES as readonly number[]).includes(t) ? (t as RangeDays) : undefined;
+  return { view: isView(v) ? v : undefined, week: d("woche"), day: d("tag"), night: d("nacht"), key: q.get("auswahl") ?? undefined, target, range };
 }
 
 export function StablingPanel() {
@@ -71,6 +81,10 @@ export function StablingPanel() {
   const [history, setHistory] = useState<{ week: string; from: string; to: string; entries: StablingEntry[] } | null>(null);
   const [recurTol, setRecurTol] = useState(60);
   const [recurMinWeeks, setRecurMinWeeks] = useState(2);
+  const [recent, setRecent] = useState<{ entries: StablingEntry[]; at: number } | null>(null);
+  const [searchTarget, setSearchTarget] = useState<Target | null>(init.target ?? null);
+  const [rangeDays, setRangeDays] = useState<RangeDays>(init.range ?? 7);
+  const { status: scanner } = useScannerStatus(60_000);
   const marks = useMarks();
   const notes = useStationNotes();
 
@@ -113,6 +127,17 @@ export function StablingPanel() {
       window.clearInterval(id);
     };
   }, [week]);
+  // Letzte 30 Tage für Suche und Profil, unabhängig von der gewählten Woche
+  useEffect(() => {
+    let alive = true;
+    const load = () => fetchStablingRecent(Date.now()).then((r) => alive && setRecent({ entries: r.entries, at: Date.now() }), () => {});
+    void load();
+    const id = window.setInterval(() => document.visibilityState !== "hidden" && void load(), 5 * REFRESH_MS);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, []);
   useEffect(() => {
     fetchLines().then((l) => setLines(new Map(l.map((x) => [x.id, x]))), () => {});
   }, []);
@@ -123,9 +148,14 @@ export function StablingPanel() {
     if (picked) q.set("woche", week);
     if (view === "tag") q.set("tag", day);
     if (view === "nacht") q.set("nacht", night);
+    if (view === "suche" && searchTarget) {
+      q.set(searchTarget.kind, searchTarget.id);
+      if (searchTarget.kind === "ort") q.set("name", searchTarget.label);
+      q.set("tage", String(rangeDays));
+    }
     if (selected) q.set("auswahl", selected);
     window.history.replaceState(null, "", `${window.location.pathname}?${q}`);
-  }, [view, picked, week, day, night, selected]);
+  }, [view, picked, week, day, night, selected, searchTarget, rangeDays]);
 
   const stays = useMemo(() => toStays(log?.entries ?? []), [log]);
   const allStays = useMemo(() => toStays([...(log?.earlier ?? []), ...(log?.entries ?? []), ...(log?.later ?? [])]), [log]);
@@ -137,6 +167,14 @@ export function StablingPanel() {
   // Woche und Verlauf zusammen, jede Abstellung einmal (gleicher Schlüssel)
   const historyStays = useMemo(() => toStays([...(hist?.entries ?? []), ...(log?.earlier ?? []), ...(log?.entries ?? []), ...(log?.later ?? [])]), [hist, log]);
   const recurring = useMemo(() => recurringSlots(historyStays, recurTol, recurMinWeeks), [historyStays, recurTol, recurMinWeeks]);
+  const recentStays = useMemo(() => toStays(recent?.entries ?? []), [recent]);
+  const targets = useMemo(() => searchables(recentStays), [recentStays]);
+  const openTarget = useCallback((t: Target | null) => {
+    setSearchTarget(t);
+    setSelected(null);
+    setView("suche");
+    if (t) window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
   const lineStyle: LineStyleFn = useCallback((id) => ({ color: lineColor(lines, id), textColor: lineTextColor(lines, id) }), [lines]);
 
   const goWeek = (w: string) => {
@@ -159,12 +197,13 @@ export function StablingPanel() {
     setView(v);
   }, [thisWeek]);
 
-  const selectedStay = selected ? allStays.find((s) => s.key === selected) ?? null : null;
+  const selectedStay = selected ? allStays.find((s) => s.key === selected) ?? recentStays.find((s) => s.key === selected) ?? historyStays.find((s) => s.key === selected) ?? null : null;
   const props: ViewProps = {
     week, days, today, now, stays, allStays, relations, relByStay, windowMin, setWindowMin, marks, notes,
     selected, select: setSelected, lineStyle, goTo, day, night, nightHours, setNightHours,
     recur: recurring.byStay, recurSlots: recurring.slots, recurTol, setRecurTol, recurMinWeeks, setRecurMinWeeks,
     historyRange: hist ? { from: hist.from, to: hist.to } : null,
+    recentStays, recentLoaded: recent != null, searchTarget, openTarget, rangeDays, setRangeDays,
   };
   const [wa, wb] = weekRange(week);
   const inW = (t: number) => t >= wa && t < wb;
@@ -188,8 +227,17 @@ export function StablingPanel() {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <h1 className="text-xl font-semibold tracking-tight">Abstellprotokoll</h1>
           <DataBadge state="vermutung" label="Aus Scans erkannt" />
+          <span className="text-[12px] text-faint" title="Wann der Scanner zuletzt erfolgreich gelesen hat und wann diese Seite die Daten geholt hat">
+            Stand: {scanner?.last_success_at ? <>letzter Scan {fmtRelative(scanner.last_success_at, now)}</> : "letzter Scan unbekannt"}
+            {recent && <> · geladen {fmtTime(recent.at)}</>}
+          </span>
         </div>
 
+        <div className="mt-3">
+          <SearchBox targets={targets} onPick={openTarget} current={view === "suche" ? searchTarget : null} />
+        </div>
+
+        {view !== "suche" && (
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-3">
           <nav aria-label="Woche" className="flex items-center gap-2 max-sm:w-full">
             <button className={weekBtn} onClick={() => goWeek(addDays(week, -7))} disabled={week <= FIRST_WEEK} aria-label="Vorherige Woche">
@@ -212,14 +260,15 @@ export function StablingPanel() {
             <dl className="flex flex-wrap gap-x-5 gap-y-1 text-[12.5px] text-muted sm:ml-auto">
               <Stat k="Abstellungen" v={stays.length} />
               <Stat k="steht noch" v={standing} color={C.standing} />
-              <Stat k="gleichzeitig abgestellt (A)" v={new Set(weekRel.filter((r) => r.category === "A").flatMap((r) => [r.a.key, r.b.key])).size} color={C.overlap} title="Abstellungen mit tatsächlicher Überschneidung am selben Standort" />
+              <Stat k="gleichzeitig abgestellt" v={new Set(weekRel.filter((r) => r.category === "A").flatMap((r) => [r.a.key, r.b.key])).size} color={C.overlap} title="Abstellungen mit tatsächlicher Überschneidung am selben Standort" />
               <Stat k="wiederkehrend" v={stays.filter((s) => recurring.byStay.has(s.key)).length} color={C.recur} title="Abstellungen, die sich am selben Ort, Wochentag und zu ähnlicher Uhrzeit in mehreren Wochen wiederholen" />
               <Stat k="markiert stehend" v={markedStanding} color={C.marked} />
               <Stat k="nach Plochingen verschoben" v={log.moved} title="Fahrzeuge, nicht im Protokoll" />
             </dl>
           )}
         </div>
-        {week === FIRST_WEEK && (
+        )}
+        {view !== "suche" && week === FIRST_WEEK && (
           <p className="mt-2 text-[12px] leading-relaxed text-faint">
             Vor Mi 25.11., 14:35 Uhr nachträglich aus den damaligen Scans ergänzt. Gescannt wurde nur zeitweise, deshalb fehlen viele Züge und Abfahrten.
           </p>
@@ -242,9 +291,15 @@ export function StablingPanel() {
 
         {error && <p role="alert" className="mt-4 text-[13px] text-bad">Protokoll nicht abrufbar: {error}</p>}
         {marks.error && <p role="alert" className="mt-4 text-[13px] text-bad">{marks.error}</p>}
-        {!log && !error && <p className="mt-6 text-[13px] text-faint">Protokoll wird geladen …</p>}
+        {view === "suche" ? (
+          <div className="mt-4" role="tabpanel">
+            <ProfileView {...props} />
+          </div>
+        ) : !log && !error ? (
+          <p className="mt-6 text-[13px] text-faint">Protokoll wird geladen …</p>
+        ) : null}
 
-        {log && (
+        {log && view !== "suche" && (
           <div className="mt-4" role="tabpanel">
             {view === "woche" ? (
               <WeekView {...props} />
@@ -271,6 +326,7 @@ export function StablingPanel() {
             <li>Jede Abstellung ist nur einmal gespeichert. Woche, Tag, Nacht, Protokoll und Analyse zeigen Ausschnitte derselben Einträge. Unbekannte Enden werden nicht erfunden: Offene Balken reichen bis jetzt (höchstens 48 h) und sind schraffiert.</li>
             <li>Zusammenhänge beruhen nur auf Abstellzeiten am selben Standort, nicht auf Fahrten. A = nachweislich gleichzeitig abgestellt, B = zeitlich nahe oder wegen unbekannter Zeiten nur möglich. Standortübergreifend wird nur dasselbe Fahrzeug verknüpft.</li>
             <li>↻ wiederkehrend: Am selben Abstellort wurde am selben Wochentag zu ähnlicher Uhrzeit (Standard ±60 min) in mehreren Wochen ein Zug abgestellt, egal welcher Zug oder welches Fahrzeug. Verglichen werden bis zu 8 Wochen davor und danach.</li>
+            <li>Suche: zeigt für ein Fahrzeug, eine Zugnummer oder einen Standort die erkannten Abstellungen der letzten 7, 14 oder 30 Tage. „Typische Uhrzeit“ ist die mittlere Hälfte der Ankunftszeiten, die Dauer zählt nur Abstellungen mit beobachteter Abholung. Der Besuchstipp wertet nur die Vergangenheit aus und nennt, an wie vielen der Wochentage es zutraf; er ist keine Vorhersage.</li>
             <li>Notizen sind eigene Angaben und werden nie als Zugbewegung gewertet.</li>
             <li>Nicht im Protokoll: Züge, die nach 48 h (Schwabstraße 60 min) automatisch nach Plochingen verschoben wurden. Ohne Scans entsteht kein Eintrag. Lücken in der Nacht schließt der Zeitplan im <Link href="/scanner" className="text-fg underline decoration-white/30 underline-offset-2">Scanner</Link>.</li>
           </ul>

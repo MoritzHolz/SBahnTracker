@@ -7,6 +7,7 @@
 import { useMemo } from "react";
 import { addDays, dayKey, dayStart, fmtDay } from "@/lib/stabling";
 import { dayRange, nightSpan, notesInRange, segmentsIn, staysAtNote, weekdayOf, weekNights, WEEKDAYS, WEEKDAYS_SHORT, type NoteAt, type Range, type Seg } from "@/lib/stablingModel";
+import { clockSpread, minuteOfDay, spreadText } from "@/lib/stablingProfile";
 import { fmtTime } from "@/lib/time";
 import { blockBackground, blockRing, C, durationText, endText, Legend, NoteMark, RecurBadge, RelBadge, startText, TransferMark, Vehicles, type ViewProps } from "./shared";
 import { FilterBar, H, stayTitle, useScrollToSelected, useStayFilter } from "./TimeShared";
@@ -119,7 +120,9 @@ export function TimeWindowView(p: ViewProps & { mode: "tag" | "nacht" }) {
           </div>
         </div>
 
-        <div className="mt-3 space-y-2">
+        {isNight && segs.length > 0 && <NightSummary segs={segs} end={b} now={now} />}
+
+        <Settings night={isNight} label={`${fmtTime(a)}–${tickLabel(b)} Uhr${f.station ? " · ein Standort" : ""}${f.onlyMarked ? " · nur markierte" : ""}`} active={!!(f.station || f.onlyMarked)}>
             {isNight && (
               <div className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted">
                 <span>Zeitspanne</span>
@@ -142,7 +145,7 @@ export function TimeWindowView(p: ViewProps & { mode: "tag" | "nacht" }) {
               </div>
             )}
           <FilterBar f={f} marked={marks.ids.size} />
-        </div>
+        </Settings>
 
         {groups.length === 0 ? (
           <p className="py-8 text-center text-[13px] text-muted">
@@ -270,5 +273,35 @@ function Row({ s, p, x, ticks, notes, nowAt, withDay }: { s: Seg; p: ViewProps; 
         </span>
       </button>
     </li>
+  );
+}
+
+/** Nacht in einem Satz: wie viele Züge, wie viele blieben bis zum Morgen, wann wurden sie abgeholt */
+function NightSummary({ segs, end, now }: { segs: Seg[]; end: number; now: number }) {
+  const stays = [...new Map(segs.map((s) => [s.stay.key, s.stay])).values()];
+  const stayed = stays.filter((s) => (s.endKind === "exact" && s.end! >= end) || (s.endKind === "ongoing" && now >= end));
+  const pickups = clockSpread(stays.filter((s) => s.endKind === "exact").map((s) => minuteOfDay(s.end!)));
+  const unknown = stays.filter((s) => s.endKind !== "exact" && s.endKind !== "ongoing").length;
+  return (
+    <p className="mt-3 rounded-md bg-white/[0.04] px-3 py-2 text-[13.5px] leading-relaxed">
+      <b>{stays.length} {stays.length === 1 ? "Zug stand" : "Züge standen"}</b> in dieser Nacht abgestellt
+      {stayed.length > 0 && <>, <b>{stayed.length}</b> davon nachweislich bis {fmtTime(end)} Uhr oder länger</>}.{" "}
+      {pickups && <>Abgeholt {pickups.n === 1 ? "um" : "meist"} <b className="tnum">{pickups.n === 1 ? `${fmtTime(stays.find((s) => s.endKind === "exact")!.end!)} Uhr` : spreadText(pickups)}</b>{pickups.n > 1 && ` (aus ${pickups.n} beobachteten Abholungen)`}. </>}
+      {unknown > 0 && <span className="text-muted">Bei {unknown} ist die Abholung nicht beobachtet.</span>}
+    </p>
+  );
+}
+
+/** Zeitspanne und Filter: in der Nacht eingeklappt, damit die Züge sofort sichtbar sind */
+function Settings({ night, label, active, children }: { night: boolean; label: string; active: boolean; children: React.ReactNode }) {
+  if (!night) return <div className="mt-3 space-y-2">{children}</div>;
+  return (
+    <details open={active} className="group mt-3 rounded-md border border-line">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-[12.5px] text-muted hover:text-fg compact:py-3">
+        <span>Zeitspanne und Filter: <span className="tnum text-fg">{label}</span></span>
+        <span aria-hidden className="transition-transform group-open:rotate-180">▾</span>
+      </summary>
+      <div className="space-y-2 border-t border-line px-3 py-2">{children}</div>
+    </details>
   );
 }

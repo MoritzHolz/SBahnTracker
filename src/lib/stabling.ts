@@ -85,6 +85,13 @@ export async function fetchStablingWeek(week: string): Promise<StablingWeek> {
 export const HISTORY_WEEKS = 8;
 
 /** Abstellungen der umliegenden Wochen (ab FIRST_WEEK, höchstens bis heute) für den Vergleich Woche für Woche */
+/** Abstellungen der letzten Tage bis jetzt (für Suche und Profil), nie vor Aufzeichnungsbeginn */
+export async function fetchStablingRecent(now: number, days = 31): Promise<{ from: number; entries: StablingEntry[] }> {
+  const from = Math.max(dayStart(addDays(dayKey(now), -days)), dayStart(FIRST_WEEK));
+  const { entries } = await fetchRange(from, now + 3_600_000);
+  return { from, entries };
+}
+
 export async function fetchStablingHistory(week: string, now: number): Promise<{ from: string; to: string; entries: StablingEntry[] }> {
   const fromWeek = addDays(week, -7 * HISTORY_WEEKS) < FIRST_WEEK ? FIRST_WEEK : addDays(week, -7 * HISTORY_WEEKS);
   const toWeek = addDays(week, 7 * (HISTORY_WEEKS + 1));

@@ -6,6 +6,7 @@ import type { CSSProperties } from "react";
 import type { Marks, Notes } from "@/hooks/useStablingUser";
 import { fmtDay, fmtStay } from "@/lib/stabling";
 import { slotLabel, stayDuration, type RecurSlot, type Relation, type Stay } from "@/lib/stablingModel";
+import type { RangeDays, Target } from "@/lib/stablingProfile";
 import { fmtTime } from "@/lib/time";
 
 // ------------------------------------------------------------------ Farben (überall dieselbe Bedeutung)
@@ -231,7 +232,7 @@ export function Legend({ parts = ["status", "marked", "rel", "recur", "note"] }:
 
 // ------------------------------------------------------------------ Gemeinsame Props aller Ansichten
 
-export type View = "woche" | "tag" | "nacht" | "protokoll" | "analyse" | "markiert" | "notizen";
+export type View = "suche" | "woche" | "tag" | "nacht" | "protokoll" | "analyse" | "markiert" | "notizen";
 
 export type LineStyleFn = (id: string) => { color: string; textColor: string };
 
@@ -283,4 +284,13 @@ export interface ViewProps {
   setRecurMinWeeks: (n: number) => void;
   /** geladene Wochen für den Vergleich (Montage), null solange geladen wird */
   historyRange: { from: string; to: string } | null;
+  /** Abstellungen der letzten 30 Tage bis jetzt (Suche und Profil, unabhängig von der gewählten Woche) */
+  recentStays: Stay[];
+  recentLoaded: boolean;
+  /** gesuchtes Fahrzeug, Standort oder Zug; null = Startseite der Suche */
+  searchTarget: Target | null;
+  /** Profil öffnen (wechselt in die Suche), null = Suche zurücksetzen */
+  openTarget: (t: Target | null) => void;
+  rangeDays: RangeDays;
+  setRangeDays: (d: RangeDays) => void;
 }
