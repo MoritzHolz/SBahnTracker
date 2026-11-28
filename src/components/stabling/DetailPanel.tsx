@@ -4,7 +4,7 @@
 import { useEffect } from "react";
 import { LineBadge } from "@/components/ui/Badges";
 import { addDays, dayKey, fmtDay, weekNumber, weekOf } from "@/lib/stabling";
-import { drawEnd, nightSpan, notesOn, slotLabel, staysAtNote, type Stay } from "@/lib/stablingModel";
+import { drawEnd, nightSpan, notesOn, slotLabel, staysAtNote, trainKey, type Stay } from "@/lib/stablingModel";
 import { fmtTime } from "@/lib/time";
 import { C, durationText, endText, fmtGap, MarkButton, NoteMark, RecurBadge, RelBadge, startText, STATUS, statusOf, Swatch, TransferMark, Vehicles, type ViewProps } from "./shared";
 
@@ -26,6 +26,9 @@ export function DetailPanel(p: ViewProps & { stay: Stay; onClose: () => void }) 
   const e = s.entry;
   const st = STATUS[statusOf(s)];
   const rels = relByStay.get(s.key) ?? [];
+  // alle Fahrzeuge eines Zuges (Doppelzüge stehen als getrennte Abstellungen im Protokoll)
+  const trainOf = (x: Stay) => allStays.filter((y) => trainKey(y) === trainKey(x));
+  const mates = trainOf(s).filter((y) => y.key !== s.key);
   const nights = nightsOf(s, now, p.nightHours);
   const slot = p.recur.get(s.key);
   const end = drawEnd(s, now);
@@ -147,23 +150,39 @@ export function DetailPanel(p: ViewProps & { stay: Stay; onClose: () => void }) 
 
         <section className="mt-4">
           <h3 className="text-[10px] font-medium uppercase tracking-[0.12em] text-faint">Zusammenhänge am Standort</h3>
+          {mates.length > 0 && (
+            <p className="mt-1.5 text-[12.5px] text-muted">
+              Kam als Zug {e.train_number} zusammen mit{" "}
+              {mates.map((m, i) => (
+                <span key={m.key}>
+                  {i > 0 && ", "}
+                  <button onClick={() => select(m.key)} className="underline decoration-white/30 underline-offset-2 hover:text-fg"><Vehicles ids={m.vehicles} marks={marks} link={false} /></button>
+                </span>
+              ))}{" "}
+              an (Doppelzug); das ist kein zweiter Zug.
+            </p>
+          )}
           {rels.length === 0 ? (
             <p className="mt-1.5 text-[12.5px] text-muted">Keine Abstellung am selben Standort gleichzeitig oder innerhalb von {p.windowMin} min davor/danach.</p>
           ) : (
             <ul className="mt-1.5 space-y-1.5">
               {rels.map((r) => {
                 const o = r.a.key === s.key ? r.b : r.a;
+                const tr = trainOf(o);
                 return (
                   <li key={r.id}>
                     <button onClick={() => select(o.key)} className="w-full rounded-md border border-line px-2.5 py-2 text-left hover:bg-white/[0.05]">
                       <span className="flex items-center gap-2">
                         <RelBadge category={r.category} />
-                        <span className="min-w-0 truncate"><Vehicles ids={o.vehicles} marks={marks} link={false} /></span>
+                        <span className="tnum shrink-0 font-medium">Zug {o.entry.train_number}</span>
+                        <span className="min-w-0 truncate text-[12.5px]"><Vehicles ids={(tr.length ? tr : [o]).flatMap((x) => x.vehicles)} marks={marks} link={false} /></span>
                         <span className="tnum ml-auto shrink-0 text-[12px] text-muted">
                           {r.kind === "follow" ? `Abstand ${fmtGap(r.gapMin)}` : `${fmtTime(r.from)}–${fmtTime(r.to)}`}
                         </span>
                       </span>
-                      <span className="mt-0.5 block text-[12px] text-faint">{r.reason} · {r.certainty}</span>
+                      <span className="mt-0.5 block text-[12px] text-faint">
+                        {r.kind === "follow" ? r.reason : r.category === "A" ? "standen nachweislich gleichzeitig dort" : "Überschneidung möglich, weil eine Ankunft oder Abholung nicht genau bekannt ist"} · {r.certainty}
+                      </span>
                     </button>
                   </li>
                 );

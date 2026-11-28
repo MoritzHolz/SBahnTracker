@@ -12,6 +12,8 @@ import {
   RECUR_TOLERANCE,
   slotLabel,
   stationChains,
+  trainKey,
+  trainRelations,
   vehicleRuns,
   weekRange,
   WINDOW_CHOICES,
@@ -86,8 +88,10 @@ export function AnalysisView(p: ViewProps) {
     (sl) => sl.stays.some((s) => s.start >= wa && s.start < wb) && (!station || sl.station === station) && (!onlyMarked || sl.stays.some(markedStay)),
   );
 
-  const nA = weekRels.filter((r) => r.category === "A").length;
-  const nB = weekRels.length - nA;
+  // gezählt je Zugpaar: ein Doppelzug zählt einmal
+  const trainRels = trainRelations(weekRels);
+  const nA = trainRels.filter((r) => r.category === "A").length;
+  const nB = trainRels.length - nA;
   const select = "h-9 min-w-0 rounded-md border border-line bg-black/30 px-2 text-[13px] text-fg compact:h-11 compact:text-[16px] [color-scheme:dark]";
   const seg = (on: boolean) => `h-8 rounded px-2.5 text-[13px] compact:h-10 ${on ? "bg-white/[0.09] text-fg" : "text-muted hover:text-fg"}`;
 
@@ -458,7 +462,6 @@ interface LinkGroup {
   partners: Partner[];
 }
 
-const trainKey = (s: Stay) => (s.entry.train_number ? `${s.entry.service_date}|${s.entry.train_number}` : s.key);
 
 /**
  * Eine Zeile je Zug: Jedes Fahrzeug erscheint genau einmal. Doppelzüge (gleicher Tag, gleiche Zugnummer) stehen

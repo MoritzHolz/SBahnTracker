@@ -9,6 +9,8 @@ import {
   notesInRange,
   notesOn,
   recurringSlots,
+  relationsByStay,
+  trainRelations,
   slotLabel,
   segmentsIn,
   stationChains,
@@ -145,6 +147,20 @@ describe("Zusammenhänge nur aus Abstellzeiten", () => {
     ];
     const r = findRelations(toStays(e), 30, NOW);
     expect(r.map((x) => [x.a.vehicles[0], x.b.vehicles[0]])).toEqual([["430 029", "430 013"], ["430 082", "430 013"]]);
+  });
+
+  it("Doppelzug als Partner zählt einmal, nicht je Fahrzeug", () => {
+    const e = [
+      E("Herrenberg", T(24, "00:46"), null, ["423 323"], { train_number: "7177", state: "unconfirmed" }),
+      E("Herrenberg", T(24, "00:46"), null, ["423 344"], { train_number: "7177", state: "unconfirmed" }),
+      E("Herrenberg", T(24, "01:14"), null, ["430 057"], { train_number: "7179", state: "unconfirmed" }),
+      E("Herrenberg", T(24, "01:14"), null, ["430 219"], { train_number: "7179", state: "unconfirmed" }),
+    ].map((x) => ({ ...x, seen_again_at: T(24, "11:00"), state: "seen_again" as const }));
+    const r = findRelations(toStays(e), 30, NOW);
+    expect(r).toHaveLength(4);
+    expect(trainRelations(r)).toHaveLength(1);
+    const by = relationsByStay(r);
+    expect(by.get(toStays(e)[0].key)).toHaveLength(1);
   });
 
   it("andere Standorte werden nie über die Zeit verknüpft", () => {

@@ -268,11 +268,38 @@ export function findRelations(stays: Stay[], windowMin: number, now: number): Re
   return out.sort((x, y) => x.from - y.from || x.id.localeCompare(y.id));
 }
 
-/** Zusammenhänge je Abstellung (für Protokoll, Details, Filter) */
+/** Ein Zug = gleicher Betriebstag und gleiche Zugnummer (Doppelzüge stehen als mehrere Abstellungen im Protokoll) */
+export const trainKey = (s: Stay) => (s.entry.train_number ? `${s.entry.service_date}|${s.entry.train_number}|${s.station}` : s.key);
+
+const stronger = (x: Relation, y: Relation) => (x.category === "A" && y.category !== "A" ? x : y.category === "A" && x.category !== "A" ? y : x.from <= y.from ? x : y);
+
+/**
+ * Zusammenhänge je Abstellung (für Protokoll, Details, Filter). Je anderem Zug nur einer: Bei einem Doppelzug
+ * erscheint der Partner einmal, nicht einmal je Fahrzeug. A (nachweislich gleichzeitig) geht vor B.
+ */
 export function relationsByStay(rels: Relation[]): Map<string, Relation[]> {
-  const m = new Map<string, Relation[]>();
-  for (const r of rels) for (const k of [r.a.key, r.b.key]) m.set(k, [...(m.get(k) ?? []), r]);
-  return m;
+  const m = new Map<string, Map<string, Relation>>();
+  for (const r of rels) {
+    for (const [self, other] of [[r.a, r.b], [r.b, r.a]] as const) {
+      const per = m.get(self.key) ?? new Map<string, Relation>();
+      m.set(self.key, per);
+      const k = trainKey(other);
+      const old = per.get(k);
+      per.set(k, old ? stronger(old, r) : r);
+    }
+  }
+  return new Map([...m].map(([k, per]) => [k, [...per.values()].sort((x, y) => x.from - y.from)]));
+}
+
+/** Zusammenhänge zwischen Zügen statt zwischen Fahrzeugen (für Zahlen in Übersichten) */
+export function trainRelations(rels: Relation[]): Relation[] {
+  const per = new Map<string, Relation>();
+  for (const r of rels) {
+    const k = [trainKey(r.a), trainKey(r.b)].sort().join("~");
+    const old = per.get(k);
+    per.set(k, old ? stronger(old, r) : r);
+  }
+  return [...per.values()].sort((x, y) => x.from - y.from);
 }
 
 export interface Chain {
