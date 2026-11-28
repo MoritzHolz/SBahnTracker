@@ -70,12 +70,15 @@ export interface StablingWeek {
   entries: StablingEntry[];
   /** in der Woche davor abgestellt (für Standzeiten über den Wochenwechsel) */
   earlier: StablingEntry[];
+  /** am Montag danach bis 12 Uhr abgestellt (für die Nacht So → Mo) */
+  later: StablingEntry[];
 }
 
 export async function fetchStablingWeek(week: string): Promise<StablingWeek> {
   const a = dayStart(week);
-  const [cur, prev] = await Promise.all([fetchRange(a, dayStart(addDays(week, 7))), fetchRange(dayStart(addDays(week, -7)), a)]);
-  return { week, moved: cur.moved, entries: cur.entries, earlier: prev.entries };
+  const b = dayStart(addDays(week, 7));
+  const [cur, prev, next] = await Promise.all([fetchRange(a, b), fetchRange(dayStart(addDays(week, -7)), a), fetchRange(b, b + 12 * 3_600_000)]);
+  return { week, moved: cur.moved, entries: cur.entries, earlier: prev.entries, later: next.entries };
 }
 
 export const entryKey = (e: StablingEntry) => `${e.station_id}|${e.service_date}|${e.line_id}|${e.train_number}|${e.vehicles.join()}`;

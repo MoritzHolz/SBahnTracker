@@ -1,59 +1,75 @@
 "use client";
 
+/**
+ * Abstellprotokoll: Seitengerüst. Lädt die Woche einmal, leitet daraus alle Ansichten ab (gleiche Datenbasis)
+ * und hält Auswahl, Markierungen, Notizen und Ansichtswechsel zusammen.
+ */
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { DataBadge, LineBadge } from "@/components/ui/Badges";
+import { AnalysisView } from "@/components/stabling/AnalysisView";
+import { DetailPanel } from "@/components/stabling/DetailPanel";
+import { MarkedView } from "@/components/stabling/MarkedView";
+import { NotesView } from "@/components/stabling/NotesView";
+import { ProtocolView } from "@/components/stabling/ProtocolView";
+import { C, type LineStyleFn, type NavTarget, type View, type ViewProps } from "@/components/stabling/shared";
+import { TimeWindowView } from "@/components/stabling/TimeWindowView";
+import { WeekView } from "@/components/stabling/WeekView";
+import { DataBadge } from "@/components/ui/Badges";
 import { useNow } from "@/hooks/useLiveData";
+import { useMarks, useStationNotes } from "@/hooks/useStablingUser";
 import { fetchLines, lineColor, lineTextColor, type Line } from "@/lib/api";
-import {
-  addDays,
-  chronicle,
-  dayKey,
-  daySegments,
-  dayStart,
-  entryKey,
-  fetchStablingWeek,
-  FIRST_WEEK,
-  fmtDay,
-  groupByStation,
-  stayText,
-  weekDays,
-  weekLabel,
-  weekOf,
-  type ChronicleItem,
-  type StablingEntry,
-  type StablingWeek,
-} from "@/lib/stabling";
-import { fmtTime } from "@/lib/time";
+import { addDays, dayKey, fetchStablingWeek, FIRST_WEEK, weekDays, weekLabel, weekOf, type StablingWeek } from "@/lib/stabling";
+import { findRelations, relationsByStay, toStays, weekRange } from "@/lib/stablingModel";
 import { AppNav } from "./StatusBar";
 
 const REFRESH_MS = 60_000;
-const VIOLET = "#c4a7ff";
 
-type View = "bahnhof" | "verlauf" | "chronik";
 const VIEWS: [View, string][] = [
-  ["bahnhof", "Nach Bahnhof"],
-  ["verlauf", "Zeitverlauf"],
-  ["chronik", "Chronik"],
+  ["woche", "Woche"],
+  ["tag", "Tag"],
+  ["nacht", "Nacht"],
+  ["protokoll", "Protokoll"],
+  ["analyse", "Analyse"],
+  ["markiert", "Markiert"],
+  ["notizen", "Notizen"],
 ];
+const isView = (v: string | null): v is View => VIEWS.some(([k]) => k === v);
 
-type LineStyleFn = (id: string) => { color: string; textColor: string };
+/** Ansicht, Tag, Nacht und Auswahl in der Adresse (Neuladen, Teilen, Zurück-Taste) */
+function readUrl() {
+  if (typeof window === "undefined") return {};
+  const q = new URLSearchParams(window.location.search);
+  const v = q.get("ansicht");
+  const d = (k: string) => (/^\d{4}-\d{2}-\d{2}$/.test(q.get(k) ?? "") ? q.get(k)! : undefined);
+  return { view: isView(v) ? v : undefined, week: d("woche"), day: d("tag"), night: d("nacht"), key: q.get("auswahl") ?? undefined };
+}
 
 export function StablingPanel() {
   const now = useNow(30_000);
   const today = dayKey(now);
   const thisWeek = weekOf(today);
+  const [init] = useState(readUrl);
   /** null = laufende Woche, springt am Montag von selbst weiter */
-  const [picked, setPicked] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string | null>(init.week && init.week < thisWeek ? weekOf(init.week) : null);
   const week = picked ?? thisWeek;
   const days = useMemo(() => weekDays(week), [week]);
   const [data, setData] = useState<StablingWeek | null>(null);
   const log = data?.week === week ? data : null;
   const [error, setError] = useState<string | null>(null);
   const [lines, setLines] = useState<Map<string, Line>>(() => new Map());
-  const [view, setView] = useState<View>("bahnhof");
-  const [station, setStation] = useState("");
-  const [day, setDay] = useState("");
+  const [view, setView] = useState<View>(init.view ?? "woche");
+  const [selected, setSelected] = useState<string | null>(init.key ?? null);
+  const [windowMin, setWindowMin] = useState(30);
+  const [nightHours, setNightHours] = useState<[number, number]>([0, 6]);
+  const inWeek = (d: string | undefined) => (d && days.includes(d) ? d : undefined);
+  const [dayPick, setDayPick] = useState<string | undefined>(init.day);
+  const [nightPick, setNightPick] = useState<string | undefined>(init.night);
+  const day = inWeek(dayPick) ?? (days.includes(today) ? today : days[0]);
+  // Standardnacht: die letzte (gestern → heute), sonst die erste der Woche
+  const night = inWeek(nightPick) ?? (days.includes(addDays(today, -1)) ? addDays(today, -1) : days[0]);
+
+  const marks = useMarks();
+  const notes = useStationNotes();
 
   useEffect(() => {
     let alive = true;
@@ -67,7 +83,11 @@ export function StablingPanel() {
         },
         (e: Error) => alive && setError(e.message),
       );
-    const refresh = () => document.visibilityState !== "hidden" && void load();
+    const refresh = () => {
+      if (document.visibilityState === "hidden") return;
+      void load();
+      void notes.reload();
+    };
     void load();
     const id = window.setInterval(refresh, REFRESH_MS);
     document.addEventListener("visibilitychange", refresh);
@@ -76,496 +96,174 @@ export function StablingPanel() {
       window.clearInterval(id);
       document.removeEventListener("visibilitychange", refresh);
     };
+    // notes.reload ist stabil
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [week]);
-  const goTo = (w: string) => {
-    setPicked(w >= thisWeek ? null : w);
-    setDay("");
-  };
   useEffect(() => {
     fetchLines().then((l) => setLines(new Map(l.map((x) => [x.id, x]))), () => {});
   }, []);
 
-  const lineStyle: LineStyleFn = (id) => ({ color: lineColor(lines, id), textColor: lineTextColor(lines, id) });
-  const all = useMemo(() => log?.entries ?? [], [log]);
-  // samt Standzeiten, die in der Vorwoche begannen (Zeitverlauf, Chronik)
-  const withEarlier = useMemo(() => [...(log?.earlier ?? []), ...all], [log, all]);
-  const stations = useMemo(() => groupByStation(all), [all]);
-  const here = useCallback((e: StablingEntry) => !station || e.station_id === station, [station]);
-  const atStation = useMemo(() => all.filter(here), [all, here]);
-  const running = useMemo(() => withEarlier.filter(here), [withEarlier, here]);
-  // Tabelle: Tag der Abstellung. Zeitverlauf: alles, was an dem Tag dort stand.
-  const shown = useMemo(() => (day ? atStation.filter((e) => dayKey(e.arrived_at) === day) : atStation), [atStation, day]);
-  // Chronik: Tag des Ereignisses, damit Ausfahrten am Folgetag erscheinen
-  const events = useMemo(() => chronicle(running).filter((i) => (day ? dayKey(i.at) === day : weekOf(dayKey(i.at)) === week)), [running, day, week]);
-  const open = shown.filter((e) => e.state === "open").length;
-  const timelineDay = day || (days.includes(today) ? today : days[0]);
+  useEffect(() => {
+    const q = new URLSearchParams();
+    q.set("ansicht", view);
+    if (picked) q.set("woche", week);
+    if (view === "tag") q.set("tag", day);
+    if (view === "nacht") q.set("nacht", night);
+    if (selected) q.set("auswahl", selected);
+    window.history.replaceState(null, "", `${window.location.pathname}?${q}`);
+  }, [view, picked, week, day, night, selected]);
+
+  const stays = useMemo(() => toStays(log?.entries ?? []), [log]);
+  const allStays = useMemo(() => toStays([...(log?.earlier ?? []), ...(log?.entries ?? []), ...(log?.later ?? [])]), [log]);
+  // „jetzt“ nur minütlich in die Analyse geben, sonst rechnet sie alle 30 s neu
+  const nowMin = Math.floor(now / 60_000) * 60_000;
+  const relations = useMemo(() => findRelations(allStays, windowMin, nowMin), [allStays, windowMin, nowMin]);
+  const relByStay = useMemo(() => relationsByStay(relations), [relations]);
+  const lineStyle: LineStyleFn = useCallback((id) => ({ color: lineColor(lines, id), textColor: lineTextColor(lines, id) }), [lines]);
+
+  const goWeek = (w: string) => {
+    setPicked(w >= thisWeek ? null : w);
+    setDayPick(undefined);
+    setNightPick(undefined);
+  };
+  const goTo = useCallback((v: View, t: NavTarget = {}) => {
+    if (t.day) {
+      const w = weekOf(t.day);
+      setPicked(w >= thisWeek ? null : w);
+      setDayPick(t.day);
+    }
+    if (t.night) {
+      const w = weekOf(t.night);
+      setPicked(w >= thisWeek ? null : w);
+      setNightPick(t.night);
+    }
+    if (t.key !== undefined) setSelected(t.key);
+    setView(v);
+  }, [thisWeek]);
+
+  const selectedStay = selected ? allStays.find((s) => s.key === selected) ?? null : null;
+  const props: ViewProps = {
+    week, days, today, now, stays, allStays, relations, relByStay, windowMin, setWindowMin, marks, notes,
+    selected, select: setSelected, lineStyle, goTo, day, night, nightHours, setNightHours,
+  };
+  const [wa, wb] = weekRange(week);
+  const inW = (t: number) => t >= wa && t < wb;
+  const weekRel = relations.filter((r) => inW(r.a.start) || inW(r.b.start));
+  const standing = stays.filter((s) => s.endKind === "ongoing").length;
+  const markedStanding = allStays.filter((s) => s.endKind === "ongoing" && marks.anyMarked(s.vehicles)).length;
 
   const weekBtn =
     "grid h-9 min-w-9 shrink-0 place-items-center rounded-md border border-line text-[18px] leading-none text-fg hover:bg-white/[0.06] disabled:opacity-30 compact:h-11 compact:min-w-11";
-  const select =
-    "h-9 min-w-0 rounded-md border border-line bg-black/30 px-2 text-[13px] text-fg compact:h-11 compact:text-[16px] [color-scheme:dark]";
 
   return (
     <main className="min-h-dvh bg-bg text-fg">
-      <header className="sticky top-0 z-10 border-b border-line bg-[var(--panel)] backdrop-blur-md">
-        <div className="page-x mx-auto max-w-4xl py-3 compact:py-1.5 compact:pt-[calc(0.375rem+env(safe-area-inset-top))]">
+      <header className="sticky top-0 z-20 border-b border-line bg-[var(--panel)] backdrop-blur-md">
+        <div className="page-x mx-auto max-w-6xl py-3 compact:py-1.5 compact:pt-[calc(0.375rem+env(safe-area-inset-top))]">
           <AppNav active="abstellungen" />
         </div>
       </header>
 
-      <div className="page-x page-b mx-auto max-w-4xl pt-8 compact:pt-5">
+      <div className={`page-x page-b mx-auto max-w-6xl pt-6 compact:pt-4 ${selectedStay ? "lg:pr-[400px]" : ""}`}>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <h1 className="text-xl font-semibold tracking-tight">Abstellprotokoll</h1>
           <DataBadge state="vermutung" label="Aus Scans erkannt" />
         </div>
-        <p className="mt-1 text-[13px] leading-relaxed text-muted">
-          Welcher Zug wann und wo abgestellt war, Woche für Woche.
-        </p>
 
-        <nav aria-label="Woche" className="mt-4 flex items-center gap-2">
-          <button className={weekBtn} onClick={() => goTo(addDays(week, -7))} disabled={week <= FIRST_WEEK} aria-label="Vorherige Woche">
-            ‹
-          </button>
-          <h2 aria-live="polite" className="tnum min-w-0 whitespace-nowrap text-center text-[15px] font-semibold max-[374px]:text-[13px] max-sm:flex-1 sm:min-w-[15rem]">
-            {weekLabel(week)}
-            {week === thisWeek && <span className="block text-[12px] font-normal text-muted">diese Woche</span>}
-          </h2>
-          <button className={weekBtn} onClick={() => goTo(addDays(week, 7))} disabled={week >= thisWeek} aria-label="Nächste Woche">
-            ›
-          </button>
-          {week !== thisWeek && (
-            <button className={`${weekBtn} px-3 text-[13px] font-medium max-sm:hidden`} onClick={() => goTo(thisWeek)}>
-              Diese Woche
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-3">
+          <nav aria-label="Woche" className="flex items-center gap-2 max-sm:w-full">
+            <button className={weekBtn} onClick={() => goWeek(addDays(week, -7))} disabled={week <= FIRST_WEEK} aria-label="Vorherige Woche">
+              ‹
             </button>
+            <h2 aria-live="polite" className="tnum min-w-0 whitespace-nowrap text-center text-[15px] font-semibold max-[374px]:text-[13px] max-sm:flex-1 sm:min-w-[15rem]">
+              {weekLabel(week)}
+              {week === thisWeek && <span className="block text-[12px] font-normal text-muted">diese Woche</span>}
+            </h2>
+            <button className={weekBtn} onClick={() => goWeek(addDays(week, 7))} disabled={week >= thisWeek} aria-label="Nächste Woche">
+              ›
+            </button>
+            {week !== thisWeek && (
+              <button className={`${weekBtn} px-3 text-[13px] font-medium max-sm:hidden`} onClick={() => goWeek(thisWeek)}>
+                Diese Woche
+              </button>
+            )}
+          </nav>
+          {log && (
+            <dl className="flex flex-wrap gap-x-5 gap-y-1 text-[12.5px] text-muted sm:ml-auto">
+              <Stat k="Abstellungen" v={stays.length} />
+              <Stat k="steht noch" v={standing} color={C.standing} />
+              <Stat k="gleichzeitig (A)" v={weekRel.filter((r) => r.category === "A").length} color={C.overlap} />
+              <Stat k="markiert stehend" v={markedStanding} color={C.marked} />
+              <Stat k="nach Plochingen verschoben" v={log.moved} title="Fahrzeuge, nicht im Protokoll" />
+            </dl>
           )}
-        </nav>
+        </div>
         {week === FIRST_WEEK && (
-          <p className="mt-3 text-[12px] leading-relaxed text-faint">
+          <p className="mt-2 text-[12px] leading-relaxed text-faint">
             Vor Mi 25.11., 14:35 Uhr nachträglich aus den damaligen Scans ergänzt. Gescannt wurde nur zeitweise, deshalb fehlen viele Züge und Abfahrten.
           </p>
         )}
 
+        <div role="tablist" aria-label="Ansicht" className="scroll-thin mt-4 flex gap-0.5 overflow-x-auto rounded-md border border-line p-0.5">
+          {VIEWS.map(([key, label]) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={view === key}
+              onClick={() => setView(key)}
+              className={`h-8 shrink-0 whitespace-nowrap rounded px-3 text-[13px] compact:h-10 max-sm:flex-1 max-sm:px-2.5 ${view === key ? "bg-white/[0.09] font-medium text-fg" : "text-muted hover:text-fg"}`}
+            >
+              {label}
+              {key === "markiert" && marks.ids.size > 0 && <span className="tnum ml-1 text-[11px]" style={{ color: C.marked }}>★{marks.ids.size}</span>}
+            </button>
+          ))}
+        </div>
+
         {error && <p role="alert" className="mt-4 text-[13px] text-bad">Protokoll nicht abrufbar: {error}</p>}
+        {marks.error && <p role="alert" className="mt-4 text-[13px] text-bad">{marks.error}</p>}
         {!log && !error && <p className="mt-6 text-[13px] text-faint">Protokoll wird geladen …</p>}
 
         {log && (
-          <>
-            <dl className="mt-5 grid grid-cols-4 gap-px overflow-hidden rounded-lg border border-line bg-[var(--line)] max-sm:grid-cols-2">
-              <Stat k="Abstellungen" v={shown.length} />
-              <Stat k="Waggons" v={shown.reduce((n, e) => n + e.cars, 0)} />
-              <Stat k="Steht noch" v={open} />
-              <Stat k="Nach Plochingen verschoben" v={log.moved} hint="Fahrzeuge, nicht im Protokoll" />
-            </dl>
-
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <div role="group" aria-label="Ansicht" className="flex rounded-md border border-line p-0.5 max-sm:w-full">
-                {VIEWS.map(([key, label]) => (
-                  <button
-                    key={key}
-                    aria-pressed={view === key}
-                    onClick={() => setView(key)}
-                    className={`h-8 whitespace-nowrap rounded px-2.5 text-[13px] compact:h-10 max-sm:flex-1 ${view === key ? "bg-white/[0.09] text-fg" : "text-muted hover:text-fg"}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <select aria-label="Bahnhof" value={station} onChange={(e) => setStation(e.target.value)} className={`${select} max-sm:flex-1 sm:ml-auto`}>
-                <option value="">Alle Bahnhöfe</option>
-                {stations.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} ({s.entries.length})
-                  </option>
-                ))}
-              </select>
-              <select aria-label="Tag" value={day} onChange={(e) => setDay(e.target.value)} className={`${select} max-sm:flex-1`}>
-                <option value="">Alle Tage</option>
-                {days.map((d) => (
-                  <option key={d} value={d}>
-                    {fmtDay(dayStart(d))}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="mt-4">
-              {view === "verlauf" ? (
-                <Timeline list={running} days={days} day={timelineDay} setDay={setDay} now={now} today={today} />
-              ) : view === "chronik" && events.length > 0 ? (
-                <Chronicle items={events} lineStyle={lineStyle} />
-              ) : view === "bahnhof" && shown.length > 0 ? (
-                <StationTables list={shown} now={now} lineStyle={lineStyle} />
-              ) : (
-                <Empty filtered={all.length > 0} past={week !== thisWeek} />
-              )}
-            </div>
-
-            <section className="mt-6 rounded-lg border border-line bg-raised p-5 text-[12px] leading-relaxed text-muted max-sm:p-4">
-              <h2 className="text-[10px] font-medium uppercase tracking-[0.12em] text-faint">So entsteht das Protokoll</h2>
-              <ul className="mt-2 list-disc space-y-1 pl-4">
-                <li>Ein Eintrag entsteht, wenn ein gelesener Zug 45 min nach der Ankunft in keiner gelesenen Abfahrt auftaucht. An der Schwabstraße gilt das nach 15 min und nur für Abfahrten vom Gegengleis.</li>
-                <li>Zeiten stammen aus Fahrplan und Echtzeit. Ankunft heißt: Ende der letzten Fahrt. Wurde die nächste Fahrt an einem anderen Bahnhof gelesen, bleibt die Abfahrt am ersten Bahnhof unbekannt.</li>
-                <li>Fährt ein abgestellter Zug als Nächstes an einem anderen Bahnhof los, gilt er als dorthin überführt und dort abgestellt. Er erscheint dann zweimal: am Bahnhof der Abstellung und am neuen Bahnhof mit der beobachteten Abfahrt, dort markiert mit <span className="mx-0.5 inline-grid h-4 w-4 place-items-center rounded-[4px] align-middle text-[11px] leading-none" style={{ background: `${VIOLET}26`, color: VIOLET }}>↪</span>. Wann und wie er dorthin kam, ist nicht bekannt: Er kann auch auf einer nicht gescannten Fahrt hingefahren sein (Annahme).</li>
-                <li>Eine Abfahrt gilt nur als beobachtet, wenn genug Abfahrten dazwischen gelesen wurden. Verspätete, aber planmäßige Wenden an der Schwabstraße zählen nicht als Abstellung.</li>
-                <li>Nicht im Protokoll: Züge, die nach 48 h (Schwabstraße 60 min) automatisch nach Plochingen verschoben wurden. Dazu zählen auch lange Standzeiten übers Wochenende. Für Plochingen selbst gilt die Regel nicht.</li>
-                <li>Ohne Scans entsteht kein Eintrag. Lücken in der Nacht schließt der Zeitplan im <Link href="/scanner" className="text-fg underline decoration-white/30 underline-offset-2">Scanner</Link>.</li>
-              </ul>
-            </section>
-          </>
+          <div className="mt-4" role="tabpanel">
+            {view === "woche" ? (
+              <WeekView {...props} />
+            ) : view === "tag" || view === "nacht" ? (
+              <TimeWindowView {...props} mode={view} />
+            ) : view === "protokoll" ? (
+              <ProtocolView {...props} />
+            ) : view === "analyse" ? (
+              <AnalysisView {...props} />
+            ) : view === "markiert" ? (
+              <MarkedView {...props} />
+            ) : (
+              <NotesView {...props} />
+            )}
+          </div>
         )}
+
+        <section className="mt-6 rounded-lg border border-line bg-raised p-5 text-[12px] leading-relaxed text-muted max-sm:p-4">
+          <h2 className="text-[10px] font-medium uppercase tracking-[0.12em] text-faint">So entsteht das Protokoll</h2>
+          <ul className="mt-2 list-disc space-y-1 pl-4">
+            <li>Ein Eintrag entsteht, wenn ein gelesener Zug 45 min nach der Ankunft in keiner gelesenen Abfahrt auftaucht. An der Schwabstraße gilt das nach 15 min und nur für Abfahrten vom Gegengleis.</li>
+            <li>Zeiten stammen aus Fahrplan und Echtzeit. Ankunft heißt: Ende der letzten Fahrt. Wurde die nächste Fahrt an einem anderen Bahnhof gelesen, bleibt die Abfahrt am ersten Bahnhof unbekannt.</li>
+            <li>Fährt ein abgestellter Zug als Nächstes an einem anderen Bahnhof los, gilt er als dorthin überführt und dort abgestellt (Symbol ↪). Wann und wie er dorthin kam, ist nicht bekannt (Annahme).</li>
+            <li>Jede Abstellung ist nur einmal gespeichert. Woche, Tag, Nacht, Protokoll und Analyse zeigen Ausschnitte derselben Einträge. Unbekannte Enden werden nicht erfunden: Offene Balken reichen bis jetzt (höchstens 48 h) und sind schraffiert.</li>
+            <li>Zusammenhänge beruhen nur auf Abstellzeiten am selben Standort, nicht auf Fahrten. A = nachweislich gleichzeitig abgestellt, B = zeitlich nahe oder wegen unbekannter Zeiten nur möglich. Standortübergreifend wird nur dasselbe Fahrzeug verknüpft.</li>
+            <li>Notizen sind eigene Angaben und werden nie als Zugbewegung gewertet.</li>
+            <li>Nicht im Protokoll: Züge, die nach 48 h (Schwabstraße 60 min) automatisch nach Plochingen verschoben wurden. Ohne Scans entsteht kein Eintrag. Lücken in der Nacht schließt der Zeitplan im <Link href="/scanner" className="text-fg underline decoration-white/30 underline-offset-2">Scanner</Link>.</li>
+          </ul>
+        </section>
       </div>
+
+      {selectedStay && <DetailPanel {...props} stay={selectedStay} onClose={() => setSelected(null)} />}
     </main>
   );
 }
 
-function Stat({ k, v, hint }: { k: string; v: number; hint?: string }) {
+function Stat({ k, v, color, title }: { k: string; v: number; color?: string; title?: string }) {
   return (
-    <div className="bg-raised px-4 py-3">
-      <dt className="text-[11px] leading-snug text-muted">{k}</dt>
-      <dd className="mt-0.5 text-[22px] font-semibold leading-tight">{v}</dd>
-      {hint && <div className="text-[11px] leading-snug text-faint">{hint}</div>}
-    </div>
-  );
-}
-
-function Empty({ filtered, past }: { filtered: boolean; past: boolean }) {
-  return (
-    <p className="rounded-lg border border-line px-5 py-8 text-center text-[13px] leading-relaxed text-muted">
-      {filtered
-        ? "Für diese Auswahl gibt es keine Abstellung."
-        : past
-          ? "In dieser Woche wurde keine Abstellung erkannt."
-          : "Noch keine Abstellung erkannt. Die ersten Einträge erscheinen frühestens 45 min nach der Ankunft eines gelesenen Zuges."}
-    </p>
-  );
-}
-
-/** Kleines Symbol: kam von woanders, war dort abgestellt */
-function TransferMark({ e }: { e: StablingEntry }) {
-  if (!e.transfer_from) return null;
-  const t = `Von woanders gekommen: abgestellt in ${e.transfer_from} seit ${fmtDay(e.arrived_at)} ${fmtTime(e.arrived_at)}`;
-  return (
-    <span title={t} aria-label={t} role="img" className="mr-1 inline-grid h-4 w-4 shrink-0 translate-y-[-1px] place-items-center rounded-[4px] align-middle text-[11px] leading-none" style={{ background: `${VIOLET}26`, color: VIOLET }}>
-      ↪
-    </span>
-  );
-}
-
-function Vehicles({ ids }: { ids: string[] }) {
-  return (
-    <>
-      {ids.map((id, i) => (
-        <span key={id}>
-          {i > 0 && <span className="text-faint"> + </span>}
-          <Link href={`/fahrzeuge?q=${encodeURIComponent(id)}`} className="tnum whitespace-nowrap font-medium hover:underline">
-            {id}
-          </Link>
-        </span>
-      ))}
-    </>
-  );
-}
-
-function DepartureText({ e }: { e: StablingEntry }) {
-  const other = (t: string) => (dayKey(t) === dayKey(e.arrived_at) ? "" : `${fmtDay(t)} `);
-  if (e.departed_at)
-    return (
-      <>
-        <span className="tnum whitespace-nowrap">
-          {other(e.departed_at)}
-          {fmtTime(e.departed_at)}
-        </span>
-        <span className="block text-[12px] text-faint">
-          {e.dep_line_id} Zug {e.dep_train_number ?? "–"}
-          {e.dep_destination && ` nach ${e.dep_destination}`}
-        </span>
-      </>
-    );
-  if (e.seen_again_at && e.transfer_to)
-    return (
-      <>
-        <span>nach {e.transfer_to} überführt</span>
-        <span className="tnum block text-[12px] text-faint">
-          Zeitpunkt unbekannt, dort ab {other(e.seen_again_at)}
-          {fmtTime(e.seen_again_at)}
-        </span>
-      </>
-    );
-  if (e.seen_again_at)
-    return (
-      <>
-        <span className="text-muted">nicht beobachtet</span>
-        <span className="tnum block text-[12px] text-faint">
-          wieder gesehen {other(e.seen_again_at)}
-          {fmtTime(e.seen_again_at)}
-          {e.seen_again_station && ` in ${e.seen_again_station}`}
-          {e.next_line_id && ` als ${e.next_line_id} Zug ${e.next_train_number ?? "–"}`}
-        </span>
-      </>
-    );
-  return e.state === "open" ? (
-    <span style={{ color: VIOLET }}>steht noch</span>
-  ) : (
-    <>
-      <span className="text-muted">noch nicht erkannt</span>
-      <span className="block text-[12px] text-faint">zu wenige Scans seither</span>
-    </>
-  );
-}
-
-/** Ankunft; am Überführungsbahnhof unbekannt */
-function ArrivalText({ e }: { e: StablingEntry }) {
-  if (e.transfer_from)
-    return (
-      <>
-        <span>aus {e.transfer_from} überführt</span>
-        <span className="tnum block text-[12px] text-faint">
-          Zeit unbekannt, frühestens {fmtTime(e.arrived_at)}
-        </span>
-      </>
-    );
-  return (
-    <>
-      {fmtTime(e.arrived_at)}
-      {e.arr_platform && <span className="block text-[12px] text-faint">Gl. {e.arr_platform}</span>}
-    </>
-  );
-}
-
-function StationTables({ list, now, lineStyle }: { list: StablingEntry[]; now: number; lineStyle: LineStyleFn }) {
-  return (
-    <div className="space-y-5">
-      {groupByStation(list).map((g) => (
-        <section key={g.id} className="overflow-hidden rounded-lg border border-line">
-          <div className="flex items-baseline justify-between gap-3 border-b border-line bg-raised px-4 py-2.5">
-            <h2 className="truncate text-[15px] font-semibold">{g.name}</h2>
-            <span className="tnum shrink-0 text-[12px] text-muted">
-              {g.entries.length} {g.entries.length === 1 ? "Abstellung" : "Abstellungen"} · {g.cars} Waggons
-            </span>
-          </div>
-          <table className="w-full table-fixed text-left text-[13px] max-sm:hidden">
-            <thead className="text-[10px] uppercase tracking-[0.08em] text-faint">
-              <tr>
-                <th className="w-[15%] px-4 py-2 font-medium">Datum</th>
-                <th className="w-[13%] py-2 pr-2 font-medium">Abgestellt</th>
-                <th className="py-2 pr-2 font-medium">Zugkennung</th>
-                <th className="w-[10%] py-2 pr-2 font-medium">Waggons</th>
-                <th className="w-[24%] py-2 pr-2 font-medium">Abfahrt</th>
-                <th className="w-[16%] py-2 pr-4 text-right font-medium">Standzeit</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[var(--line)] border-t border-line">
-              {g.entries.map((e) => (
-                <tr key={entryKey(e)} className="align-top">
-                  <td className="tnum whitespace-nowrap px-4 py-2.5">{fmtDay(e.arrived_at)}</td>
-                  <td className="tnum py-2.5 pr-2"><ArrivalText e={e} /></td>
-                  <td className="py-2.5 pr-2">
-                    <TransferMark e={e} />
-                    <Vehicles ids={e.vehicles} />
-                    <span className="mt-0.5 flex items-center gap-1.5 text-[12px] text-faint">
-                      <LineBadge id={e.line_id} {...lineStyle(e.line_id)} size="sm" />
-                      <span className="tnum">Zug {e.train_number}</span>
-                    </span>
-                  </td>
-                  <td className="tnum py-2.5 pr-2">{e.cars}</td>
-                  <td className="py-2.5 pr-2"><DepartureText e={e} /></td>
-                  <td className="tnum py-2.5 pr-4 text-right">{stayText(e, now)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <ul className="divide-y divide-[var(--line)] sm:hidden">
-            {g.entries.map((e) => (
-              <li key={entryKey(e)} className="px-4 py-3">
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-[15px]"><TransferMark e={e} /><Vehicles ids={e.vehicles} /></span>
-                  <span className="tnum shrink-0 text-[12.5px] text-muted">{e.cars} Waggons</span>
-                </div>
-                <div className="mt-1 flex items-center gap-1.5 text-[12.5px] text-faint">
-                  <LineBadge id={e.line_id} {...lineStyle(e.line_id)} size="sm" />
-                  <span className="tnum">Zug {e.train_number}</span>
-                  {e.arr_platform && <span>· Gl. {e.arr_platform}</span>}
-                </div>
-                <dl className="mt-1.5 grid grid-cols-[5.5rem_1fr] gap-y-1 text-[13px]">
-                  <dt className="text-faint">Abgestellt</dt>
-                  <dd className="tnum">{e.transfer_from ? <ArrivalText e={e} /> : `${fmtDay(e.arrived_at)} ${fmtTime(e.arrived_at)}`}</dd>
-                  <dt className="text-faint">Abfahrt</dt>
-                  <dd><DepartureText e={e} /></dd>
-                  <dt className="text-faint">Standzeit</dt>
-                  <dd className="tnum">{stayText(e, now)}</dd>
-                </dl>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-    </div>
-  );
-}
-
-const TICKS = [0, 3, 6, 9, 12, 15, 18, 21, 24];
-
-function Timeline({ list, days, day, setDay, now, today }: { list: StablingEntry[]; days: string[]; day: string; setDay: (d: string) => void; now: number; today: string }) {
-  const segs = daySegments(list, day, now);
-  const groups = groupByStation(segs.map((s) => s.entry));
-  const byKey = new Map(segs.map((s) => [entryKey(s.entry), s]));
-  const nowAt = day === today ? (now - dayStart(day)) / (dayStart(addDays(day, 1)) - dayStart(day)) : null;
-  return (
-    <section className="rounded-lg border border-line p-4">
-      <div role="group" aria-label="Tag wählen" className="flex flex-wrap gap-1.5">
-        {days.map((d) => (
-          <button
-            key={d}
-            aria-pressed={d === day}
-            onClick={() => setDay(d)}
-            className={`tnum h-8 rounded-md border px-2.5 text-[12.5px] compact:h-11 compact:px-3 ${
-              d === day ? "border-[#c4a7ff]/60 bg-[#c4a7ff]/10 text-fg" : "border-line text-muted hover:text-fg"
-            }`}
-          >
-            {fmtDay(dayStart(d))}
-            {d === today && <span className="text-faint"> heute</span>}
-          </button>
-        ))}
-      </div>
-      {segs.length === 0 ? (
-        <p className="py-8 text-center text-[13px] text-muted">An diesem Tag stand nach den Scans kein Zug.</p>
-      ) : (
-        <>
-          <div className="tnum relative mt-4 h-4 text-[10px] text-faint" aria-hidden>
-            {TICKS.map((h) => (
-              <span
-                key={h}
-                className={`absolute ${h % 6 ? "max-sm:hidden" : ""} ${h === 0 ? "" : h === 24 ? "-translate-x-full" : "-translate-x-1/2"}`}
-                style={{ left: `${(h / 24) * 100}%` }}
-              >
-                {String(h).padStart(2, "0")}
-                {h % 6 === 0 && <span className="max-sm:hidden">:00</span>}
-              </span>
-            ))}
-          </div>
-          <div className="space-y-4">
-            {groups.map((g) => (
-              <div key={g.id}>
-                <h3 className="text-[13px] font-semibold">{g.name}</h3>
-                <ul className="mt-1 space-y-2">
-                  {g.entries.map((e) => {
-                    const s = byKey.get(entryKey(e))!;
-                    const known = e.state === "departed" && !e.transfer_from;
-                    const at = `${s.before ? `${fmtDay(e.arrived_at)} ` : ""}${fmtTime(e.arrived_at)}`;
-                    const start = e.transfer_from ? `aus ${e.transfer_from} (nach ${at})` : at;
-                    const end = e.transfer_to
-                      ? `nach ${e.transfer_to} überführt`
-                      : e.departed_at
-                      ? `${s.after ? `${fmtDay(e.departed_at)} ` : ""}${fmtTime(e.departed_at)}`
-                      : e.seen_again_at
-                        ? "Abfahrt unbekannt"
-                        : e.state === "open"
-                          ? "steht noch"
-                          : "Abfahrt noch nicht erkannt";
-                    const label = `${e.vehicles.join(" + ")}, ${e.cars} Waggons, ${start} bis ${end}, Standzeit ${stayText(e, now)}`;
-                    return (
-                      <li key={entryKey(e)} title={label}>
-                        <div className="flex items-baseline justify-between gap-3 text-[12px]">
-                          <span className="min-w-0 truncate"><TransferMark e={e} /><Vehicles ids={e.vehicles} /></span>
-                          <span className="tnum shrink-0 text-muted">
-                            {start} – {end}
-                          </span>
-                        </div>
-                        <div className="relative mt-1 h-3 rounded-[4px] bg-white/[0.04]" role="img" aria-label={label}>
-                          {TICKS.slice(1, -1).map((h) => (
-                            <span key={h} className="absolute inset-y-0 w-px bg-white/[0.06]" style={{ left: `${(h / 24) * 100}%` }} />
-                          ))}
-                          <span
-                            className={`absolute inset-y-0 min-w-[3px] ${s.before ? "" : "rounded-l-[4px]"} ${s.after || !known ? "" : "rounded-r-[4px]"}`}
-                            style={{
-                              left: `${s.from * 100}%`,
-                              width: `${(s.to - s.from) * 100}%`,
-                              background: known ? VIOLET : `repeating-linear-gradient(135deg, ${VIOLET} 0 4px, ${VIOLET}59 4px 8px)`,
-                            }}
-                          />
-                          {nowAt != null && <span className="absolute -inset-y-0.5 w-px bg-white/50" style={{ left: `${nowAt * 100}%` }} />}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))}
-          </div>
-          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 border-t border-line pt-3 text-[12px] text-muted">
-            <span className="flex items-center gap-1.5">
-              <span className="h-2.5 w-5 rounded-[3px]" style={{ background: VIOLET }} /> Ankunft und Abfahrt bekannt
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2.5 w-5" style={{ background: `repeating-linear-gradient(135deg, ${VIOLET} 0 4px, ${VIOLET}59 4px 8px)` }} /> Anfang oder Ende offen bzw. nicht beobachtet
-            </span>
-            {segs.some((x) => x.entry.transfer_from) && (
-              <span className="flex items-center gap-1.5">
-                <span className="grid h-4 w-4 place-items-center rounded-[4px] text-[11px]" style={{ background: `${VIOLET}26`, color: VIOLET }}>↪</span> von woanders gekommen, war dort abgestellt
-              </span>
-            )}
-            {nowAt != null && (
-              <span className="flex items-center gap-1.5">
-                <span className="h-3 w-px bg-white/50" /> jetzt
-              </span>
-            )}
-          </div>
-        </>
-      )}
-    </section>
-  );
-}
-
-const KIND: Record<ChronicleItem["kind"], string> = { in: "abgestellt", out: "ausgefahren", seen: "wieder gesehen" };
-
-function Chronicle({ items, lineStyle }: { items: ChronicleItem[]; lineStyle: LineStyleFn }) {
-  const days = new Map<string, ChronicleItem[]>();
-  for (const i of items) {
-    const k = dayKey(i.at);
-    days.set(k, [...(days.get(k) ?? []), i]);
-  }
-  return (
-    <div className="space-y-5">
-      {[...days].map(([key, dayItems]) => (
-        <section key={key} className="overflow-hidden rounded-lg border border-line">
-          <h2 className="tnum border-b border-line bg-raised px-4 py-2.5 text-[15px] font-semibold">{fmtDay(dayStart(key))}</h2>
-          <ol className="divide-y divide-[var(--line)]">
-            {dayItems.map((i) => {
-              const e = i.entry;
-              const line = i.kind === "out" && e.dep_line_id ? e.dep_line_id : e.line_id;
-              return (
-                <li key={`${entryKey(e)}-${i.kind}`} className="flex gap-3 px-4 py-2.5 text-[13px]">
-                  <span className="tnum w-10 shrink-0 font-medium">{fmtTime(i.at)}</span>
-                  <span aria-hidden className="w-3 shrink-0 text-center" style={{ color: i.kind === "in" ? VIOLET : undefined }}>
-                    {i.kind === "in" ? "■" : i.kind === "out" ? "→" : "?"}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <TransferMark e={e} />
-                    <Vehicles ids={e.vehicles} /> <span className="text-muted">{KIND[i.kind]}</span>{" "}
-                    <span>{i.kind === "seen" ? `in ${e.seen_again_station ?? "–"}` : e.station_name}</span>
-                    <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px] text-faint">
-                      {i.kind === "seen" ? (
-                        <span>Abfahrt aus {e.station_name} nicht beobachtet</span>
-                      ) : (
-                        <>
-                          <LineBadge id={line} {...lineStyle(line)} size="sm" />
-                          <span className="tnum">
-                            Zug {(i.kind === "out" ? e.dep_train_number : e.train_number) ?? "–"}
-                            {i.kind === "out" ? e.dep_destination && ` nach ${e.dep_destination}` : e.origin_name && ` aus ${e.origin_name}`} · {e.cars} Waggons
-                          </span>
-                          {i.kind === "out" && e.transfer_from && (
-                            <span>· vorher aus {e.transfer_from} überführt (abgestellt dort {fmtDay(e.arrived_at)} {fmtTime(e.arrived_at)})</span>
-                          )}
-                        </>
-                      )}
-                    </span>
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
-        </section>
-      ))}
+    <div className="flex items-baseline gap-1.5" title={title}>
+      <dd className="tnum text-[15px] font-semibold text-fg" style={color && v > 0 ? { color } : undefined}>{v}</dd>
+      <dt>{k}</dt>
     </div>
   );
 }
