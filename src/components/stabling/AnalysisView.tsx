@@ -343,7 +343,10 @@ function ChainCard(p: ViewProps & { chain: Chain }) {
   const mid = (i: number) => i * ROW + ROW / 2;
   const height = rows.length * ROW;
   const ticks = [lo, lo + (hi - lo) / 2, hi];
-  const nA = chain.links.filter((l) => l.category === "A").length;
+  const groups = useMemo(() => groupLinks(chain.links), [chain.links]);
+  // gezählt wie angezeigt: Teile desselben Zuges zählen einmal
+  const shown = groups.flatMap((g) => g.partners);
+  const nA = shown.filter((x) => x.rel.category === "A").length;
 
   return (
     <article className="overflow-hidden rounded-lg border border-line">
@@ -353,7 +356,7 @@ function ChainCard(p: ViewProps & { chain: Chain }) {
           {rows.length} Abstellungen · {spanText(lo, hi)}
           {together > 2 && <span style={{ color: C.overlap }}>· bis zu {together} gleichzeitig</span>}
           {nA > 0 && <RelBadge category="A" count={nA} />}
-          {chain.links.length - nA > 0 && <RelBadge category="B" count={chain.links.length - nA} />}
+          {shown.length - nA > 0 && <RelBadge category="B" count={shown.length - nA} />}
         </span>
       </header>
 
@@ -430,51 +433,111 @@ function ChainCard(p: ViewProps & { chain: Chain }) {
       </div>
 
       <ul className="divide-y divide-[var(--line)] border-t border-line">
-        {(open ? chain.links : chain.links.slice(0, LINK_LIMIT)).map((r) => (
-          <RelationRow key={r.id} r={r} {...p} />
+        {(open ? groups : groups.slice(0, LINK_LIMIT)).map((g) => (
+          <RelationGroup key={g.leads[0].key} g={g} {...p} />
         ))}
       </ul>
-      {chain.links.length > LINK_LIMIT && (
+      {groups.length > LINK_LIMIT && (
         <button onClick={() => setOpen(!open)} aria-expanded={open} className="h-9 w-full border-t border-line text-[12.5px] text-muted hover:bg-white/[0.04] hover:text-fg compact:h-11">
-          {open ? "Weniger anzeigen" : `Alle ${chain.links.length} Zusammenhänge anzeigen`}
+          {open ? "Weniger anzeigen" : `Alle ${groups.length} Abstellungen mit Zusammenhängen anzeigen`}
         </button>
       )}
     </article>
   );
 }
 
-function RelationRow(p: ViewProps & { r: Relation }) {
-  const { r, now, marks, select, lineStyle, selected } = p;
-  const side = (s: Stay) => (
-    <button
-      onClick={() => select(s.key)}
-      className="min-w-0 rounded-md px-2 py-1.5 text-left hover:bg-white/[0.05]"
-      style={blockRing(marks.anyMarked(s.vehicles), selected === s.key)}
-    >
-      <span className="flex flex-wrap items-center gap-1.5">
-        <TransferMark s={s} />
-        <Vehicles ids={s.vehicles} marks={marks} link={false} />
-        <LineBadge id={s.entry.line_id} {...lineStyle(s.entry.line_id)} size="sm" />
-        <span className="tnum text-[12px] text-faint">Zug {s.entry.train_number}</span>
-      </span>
-      <span className="tnum mt-0.5 block text-[12px] text-muted">
-        {startText(s)} – {endText(s, now)} · {durationText(s, now)}
-      </span>
-    </button>
+interface Partner {
+  /** alle Abstellungen desselben Zuges (gleicher Tag, gleiche Zugnummer) */
+  stays: Stay[];
+  rel: Relation;
+}
+interface LinkGroup {
+  /** Abstellungen desselben Zuges, zu denen die Zusammenhänge gehören */
+  leads: Stay[];
+  partners: Partner[];
+}
+
+/**
+ * Jede Abstellung erscheint nur einmal als Kopfzeile: Zusammenhänge hängen an der früher begonnenen Abstellung.
+ * Partner mit gleichem Tag und gleicher Zugnummer werden zu einem Eintrag zusammengefasst, ebenso Kopfzeilen.
+ */
+function groupLinks(links: Relation[]): LinkGroup[] {
+  const trainKey = (s: Stay) => (s.entry.train_number ? `${s.entry.service_date}|${s.entry.train_number}` : s.key);
+  const groups = new Map<string, LinkGroup>();
+  for (const r of links) {
+    const lk = trainKey(r.a);
+    const g = groups.get(lk) ?? { leads: [], partners: [] };
+    groups.set(lk, g);
+    if (!g.leads.includes(r.a)) g.leads.push(r.a);
+    const pk = trainKey(r.b);
+    const hit = g.partners.find((x) => trainKey(x.stays[0]) === pk && x.rel.kind === r.kind);
+    if (!hit) g.partners.push({ stays: [r.b], rel: r });
+    else if (!hit.stays.includes(r.b)) hit.stays.push(r.b);
+  }
+  return [...groups.values()];
+}
+
+function RelationGroup(p: ViewProps & { g: LinkGroup }) {
+  const { g, now, marks, select, lineStyle, selected } = p;
+  const s = g.leads[0];
+  const sub = (x: Stay) => (
+    <span className="tnum block text-[12px] text-muted">
+      {startText(x)} – {endText(x, now)} · {durationText(x, now)}
+    </span>
   );
+  /** Zeiten einmal zeigen, wenn alle gleich sind, sonst je Fahrzeug */
+  const times = (list: Stay[]) =>
+    list.every((x) => x.start === list[0].start && x.end === list[0].end)
+      ? sub(list[0])
+      : list.map((x) => (
+          <span key={x.key} className="flex flex-wrap gap-x-1.5">
+            <span className="tnum text-[12px] text-faint">{x.vehicles.join(" + ")}:</span>
+            {sub(x)}
+          </span>
+        ));
   return (
     <li className="px-4 py-2.5 text-[13px]">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <RelBadge category={r.category} />
-        <span className="font-medium" style={{ color: r.category === "A" ? C.overlap : C.near }}>{KIND_TEXT[r.kind]}</span>
-        <span className="tnum text-muted">{r.kind === "follow" ? `Abstand ${fmtGap(r.gapMin)} (${fmtTime(r.from)} → ${fmtTime(r.to)})` : spanText(r.from, r.to)}</span>
-        <span className="text-[12px] text-faint">· {r.stationName} · Sicherheit: {r.certainty}</span>
-      </div>
-      <div className="mt-1 grid gap-1 sm:grid-cols-2">
-        {side(r.a)}
-        {side(r.b)}
-      </div>
-      <p className="mt-0.5 px-2 text-[12px] text-faint">{r.reason}</p>
+      <button
+        onClick={() => select(s.key)}
+        className="w-full rounded-md px-2 py-1.5 text-left hover:bg-white/[0.05]"
+        style={blockRing(g.leads.some((x) => marks.anyMarked(x.vehicles)), g.leads.some((x) => selected === x.key))}
+      >
+        <span className="flex flex-wrap items-center gap-1.5">
+          <TransferMark s={s} />
+          <Vehicles ids={g.leads.flatMap((x) => x.vehicles)} marks={marks} link={false} />
+          <LineBadge id={s.entry.line_id} {...lineStyle(s.entry.line_id)} size="sm" />
+          <span className="tnum text-[12px] text-faint">Zug {s.entry.train_number}</span>
+        </span>
+        {times(g.leads)}
+      </button>
+      <ul className="mt-1 space-y-1 border-l border-line pl-3 sm:ml-2">
+        {g.partners.map(({ stays, rel: r }) => {
+          const o = stays[0];
+          return (
+            <li key={r.id}>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-2 pt-1 text-[12px]" title={r.reason}>
+                <RelBadge category={r.category} />
+                <span className="font-medium" style={{ color: r.category === "A" ? C.overlap : C.near }}>{KIND_TEXT[r.kind]}</span>
+                <span className="tnum text-muted">{r.kind === "follow" ? `Abstand ${fmtGap(r.gapMin)} (${fmtTime(r.from)} → ${fmtTime(r.to)})` : spanText(r.from, r.to)}</span>
+                <span className="text-faint">· {r.certainty}</span>
+              </div>
+              <button
+                onClick={() => select(o.key)}
+                className="w-full rounded-md px-2 py-1 text-left hover:bg-white/[0.05]"
+                style={blockRing(stays.some((x) => marks.anyMarked(x.vehicles)), stays.some((x) => selected === x.key))}
+              >
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <TransferMark s={o} />
+                  <Vehicles ids={stays.flatMap((x) => x.vehicles)} marks={marks} link={false} />
+                  <LineBadge id={o.entry.line_id} {...lineStyle(o.entry.line_id)} size="sm" />
+                  <span className="tnum text-[12px] text-faint">Zug {o.entry.train_number}</span>
+                </span>
+                {times(stays)}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </li>
   );
 }

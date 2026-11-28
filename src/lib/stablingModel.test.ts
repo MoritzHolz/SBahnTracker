@@ -137,6 +137,16 @@ describe("Zusammenhänge nur aus Abstellzeiten", () => {
     expect(recurringSlots(toStays(mon), 60).slots).toHaveLength(0);
   });
 
+  it("gleiche Zugnummer am selben Tag ist ein Zug, kein Zusammenhang", () => {
+    const e = [
+      E("Backnang", T(24, "00:49"), T(24, "09:17"), ["430 029"], { train_number: "7376" }),
+      E("Backnang", T(24, "00:49"), T(24, "09:48"), ["430 082"], { train_number: "7376" }),
+      E("Backnang", T(24, "00:52"), T(24, "11:09"), ["430 013"], { train_number: "7474" }),
+    ];
+    const r = findRelations(toStays(e), 30, NOW);
+    expect(r.map((x) => [x.a.vehicles[0], x.b.vehicles[0]])).toEqual([["430 029", "430 013"], ["430 082", "430 013"]]);
+  });
+
   it("andere Standorte werden nie über die Zeit verknüpft", () => {
     const r = findRelations(toStays(mon), 60, NOW);
     expect(r.some((x) => x.a.station !== x.b.station)).toBe(false);
