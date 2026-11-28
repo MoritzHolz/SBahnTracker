@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { DataBadge, LineBadge } from "@/components/ui/Badges";
+import { useMarks } from "@/hooks/useStablingUser";
 import { PARKING_LEVEL_LABEL, parkingLevel, SITE_KIND_LABEL, type ParkedVehicle, type ParkingSite } from "@/lib/parking";
 import { fmtDateTime, fmtRelative } from "@/lib/time";
 
@@ -89,6 +90,7 @@ export function ParkedPanel({ site, lineStyle, now, onClose, handleProps, onHand
 }
 
 function Group({ title, hint, list, lineStyle, now }: { title: string; hint?: string; list: ParkedVehicle[]; lineStyle: LineStyleFn; now: number }) {
+  const marks = useMarks();
   return (
     <section className="px-5 py-3">
       <h3 className="text-[10px] font-medium uppercase tracking-[0.12em] text-faint">
@@ -101,7 +103,12 @@ function Group({ title, hint, list, lineStyle, now }: { title: string; hint?: st
           return (
             <li key={v.vehicle_id} className="py-2.5">
               <div className="flex items-baseline justify-between gap-3">
-                <Link href={`/fahrzeuge?q=${encodeURIComponent(v.vehicle_id)}`} className="tnum text-[16px] font-semibold hover:underline compact:py-1">
+                <Link
+                  href={`/fahrzeuge?q=${encodeURIComponent(v.vehicle_id)}`}
+                  className="tnum text-[16px] font-semibold hover:underline compact:py-1"
+                  style={marks.isMarked(v.vehicle_id) ? { color: "#facc15" } : undefined}
+                >
+                  {marks.isMarked(v.vehicle_id) && <span aria-label="markiert">★ </span>}
                   {v.vehicle_id}
                 </Link>
                 <span className={`text-right text-[12px] ${level === "unsicher" || level === "verschoben" ? "text-faint" : "text-[#c4a7ff]"}`}>

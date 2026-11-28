@@ -163,7 +163,8 @@ export function StablingPanel() {
         </div>
       </header>
 
-      <div className={`page-x page-b mx-auto max-w-6xl pt-6 compact:pt-4 ${selectedStay ? "lg:pr-[400px]" : ""}`}>
+      <div className={selectedStay ? "lg:pr-[390px]" : undefined}>
+      <div className="page-x page-b mx-auto max-w-6xl pt-6 compact:pt-4">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <h1 className="text-xl font-semibold tracking-tight">Abstellprotokoll</h1>
           <DataBadge state="vermutung" label="Aus Scans erkannt" />
@@ -191,7 +192,7 @@ export function StablingPanel() {
             <dl className="flex flex-wrap gap-x-5 gap-y-1 text-[12.5px] text-muted sm:ml-auto">
               <Stat k="Abstellungen" v={stays.length} />
               <Stat k="steht noch" v={standing} color={C.standing} />
-              <Stat k="gleichzeitig (A)" v={weekRel.filter((r) => r.category === "A").length} color={C.overlap} />
+              <Stat k="gleichzeitig abgestellt (A)" v={new Set(weekRel.filter((r) => r.category === "A").flatMap((r) => [r.a.key, r.b.key])).size} color={C.overlap} title="Abstellungen mit tatsächlicher Überschneidung am selben Standort" />
               <Stat k="markiert stehend" v={markedStanding} color={C.marked} />
               <Stat k="nach Plochingen verschoben" v={log.moved} title="Fahrzeuge, nicht im Protokoll" />
             </dl>
@@ -252,6 +253,7 @@ export function StablingPanel() {
             <li>Nicht im Protokoll: Züge, die nach 48 h (Schwabstraße 60 min) automatisch nach Plochingen verschoben wurden. Ohne Scans entsteht kein Eintrag. Lücken in der Nacht schließt der Zeitplan im <Link href="/scanner" className="text-fg underline decoration-white/30 underline-offset-2">Scanner</Link>.</li>
           </ul>
         </section>
+      </div>
       </div>
 
       {selectedStay && <DetailPanel {...props} stay={selectedStay} onClose={() => setSelected(null)} />}

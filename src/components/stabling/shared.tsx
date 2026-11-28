@@ -31,7 +31,7 @@ export type StayStatus = "abgefahren" | "eingegrenzt" | "steht" | "unbekannt";
 
 export const STATUS: Record<StayStatus, { label: string; color: string; hatched: boolean; hint: string }> = {
   abgefahren: { label: "Abfahrt beobachtet", color: C.stay, hatched: false, hint: "Ankunft und Abfahrt bekannt" },
-  eingegrenzt: { label: "Ende eingegrenzt", color: C.stay, hatched: true, hint: "Abfahrt nicht beobachtet, später woanders gesehen" },
+  eingegrenzt: { label: "Zeit eingegrenzt", color: C.stay, hatched: true, hint: "Abfahrt oder (bei Überführung) Ankunft nicht beobachtet, nur eingegrenzt" },
   steht: { label: "Steht noch", color: C.standing, hatched: false, hint: "Laut letzten Scans noch abgestellt" },
   unbekannt: { label: "Ende unbekannt", color: C.unknown, hatched: true, hint: "Zu wenige Scans seither" },
 };
